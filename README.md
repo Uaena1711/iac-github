@@ -12,11 +12,30 @@ approval gating.
 
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
-| Building blocks | `actions/{detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
-| Paved road | `.github/workflows/terraform.yml` (reusable workflow) | The whole standardized flow, wired |
+| Building blocks (Tier 1) | `actions/{secret-scan,detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
+| Paved road (Tier 2/3) | `.github/workflows/terraform.yml` (reusable workflow) | The whole standardized flow, wired |
 
-Use the paved road for the standard flow; compose the actions directly when you need to
-override behavior. Both share the same building blocks (DRY, no lock-in).
+The paved-road flow composes the building blocks into:
+
+```
+secret_scan (gitleaks) ─┐
+                        ├─▶ plan ─▶ apply ─▶ check
+detect ─────────────────┘
+```
+
+Secret scanning runs as a gate before any cloud access. Use the paved road for the
+standard flow; compose the actions directly when you need to override behavior. Both share
+the same building blocks (DRY, no lock-in).
+
+### Deploy vs destroy (same flow)
+
+One reusable workflow handles both via `mode`:
+
+- **deploy** (default): PR → plan preview; push to `main` → plan + apply.
+- **destroy**: run manually (`workflow_dispatch`) with `mode: destroy` and `dir: <workspace>`.
+  It builds a **destroy plan**, then `apply` executes that exact reviewed plan behind the
+  Environment approval — only what the plan captured is torn down (no blind
+  `terraform destroy -auto-approve`).
 
 ## Quick start (paved road)
 
@@ -27,8 +46,12 @@ name: terraform
 on:
   pull_request:
   push: { branches: [main] }
+  workflow_dispatch:
+    inputs:
+      mode: { type: choice, options: [deploy, destroy], default: deploy }
+      dir:  { type: string, default: "" }   # workspace to destroy when mode=destroy
 permissions:
-  id-token: write
+  id-token: write   # keyless OIDC
   contents: read
 jobs:
   terraform:
@@ -36,14 +59,17 @@ jobs:
     with:
       workspaces_root: envs
       default_region: us-east-1
-    secrets: inherit
+      mode: ${{ inputs.mode || 'deploy' }}
+      dir:  ${{ inputs.dir  || '' }}
 ```
 
 - **Pull request** → plan only (preview).
-- **Push to `main`** → plan + apply. Stacks mapped to a protected GitHub **Environment**
-  (one with required reviewers) pause for approval before apply.
+- **Push to `main`** → deploy (plan + apply; protected Environments gate apply).
+- **Run workflow → mode: destroy + dir** → reviewed destroy-plan, gated, then teardown.
 
-See [`examples/`](examples/) for the paved-road and full-override (composed) callers.
+👉 **Full working consumer:** [Uaena1711/iac-github-example](https://github.com/Uaena1711/iac-github-example)
+— copy its layout (`envs/<env>/{provider.tf,main.tf,tf-ci.env}` + the caller) to get started.
+It also shows the full-override (composed) style.
 
 ## Per-stack contract: `tf-ci.env`
 

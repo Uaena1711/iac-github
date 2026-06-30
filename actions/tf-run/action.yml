@@ -3,7 +3,7 @@ description: terraform plan or apply for one workspace (self-contained; per-stac
 
 inputs:
   command:
-    description: plan | apply
+    description: "plan | apply | destroy-plan (apply executes whatever plan was saved)"
     required: true
   dir:
     description: Workspace directory (relative to repo root).
@@ -20,6 +20,21 @@ inputs:
       (secure): plan files embed state-derived secrets, so the reusable workflow sets
       this "true" only on the default branch — never on PR preview runs.
     default: "false"
+  var_file:
+    description: Optional -var-file path (relative to the workspace dir). *.auto.tfvars auto-load too.
+    default: ""
+  tf_init_options:
+    description: Extra flags appended to `terraform init`.
+    default: ""
+  tf_plan_options:
+    description: Extra flags appended to `terraform plan`.
+    default: ""
+  tf_apply_options:
+    description: Extra flags appended to `terraform apply`.
+    default: ""
+  tf_destroy_options:
+    description: Extra flags appended to the `terraform plan -destroy` (destroy-plan) step.
+    default: ""
 
 runs:
   using: composite
@@ -49,10 +64,16 @@ runs:
       env:
         COMMAND: ${{ inputs.command }}
         TF_WORKSPACE_DIR: ${{ inputs.dir }}
+        TF_VAR_FILE: ${{ inputs.var_file }}
+        TF_INIT_OPTIONS: ${{ inputs.tf_init_options }}
+        TF_PLAN_OPTIONS: ${{ inputs.tf_plan_options }}
+        TF_APPLY_OPTIONS: ${{ inputs.tf_apply_options }}
+        TF_DESTROY_OPTIONS: ${{ inputs.tf_destroy_options }}
       run: sh "$GITHUB_ACTION_PATH/run.sh" "$COMMAND"
 
-    # plan: persist plan.tfplan + plan.status (only when upload=true, i.e. default branch).
-    - if: inputs.command == 'plan' && inputs.upload == 'true'
+    # plan/destroy-plan: persist plan.tfplan + plan.status (when upload=true) so apply can
+    # execute the exact reviewed plan.
+    - if: (inputs.command == 'plan' || inputs.command == 'destroy-plan') && inputs.upload == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.slug.outputs.name }}

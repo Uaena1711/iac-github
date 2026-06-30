@@ -76,7 +76,7 @@ case "$ACTION" in
     terraform validate
     set +e
     # shellcheck disable=SC2086
-    terraform plan -input=false -detailed-exitcode -out="$PLAN_FILE" ${TF_PLAN_OPTIONS:-}
+    terraform plan -input=false -detailed-exitcode -out="$PLAN_FILE" ${TF_VAR_FILE:+-var-file="$TF_VAR_FILE"} ${TF_PLAN_OPTIONS:-}
     code=$?
     set -e
     case "$code" in
@@ -100,6 +100,22 @@ case "$ACTION" in
       exit 1
     fi
     ;;
+  destroy-plan)
+    # Produce a DESTROY plan — this does NOT destroy anything. The teardown is executed
+    # later by `apply` applying THIS exact saved plan, after an Environment approval. So you
+    # destroy only what the reviewed plan captured (no blind `terraform destroy -auto-approve`).
+    tf_backend_init
+    set +e
+    # shellcheck disable=SC2086
+    terraform plan -input=false -destroy -detailed-exitcode -out="$PLAN_FILE" ${TF_VAR_FILE:+-var-file="$TF_VAR_FILE"} ${TF_DESTROY_OPTIONS:-}
+    code=$?
+    set -e
+    case "$code" in
+      0) log_info "nothing to destroy in ${TF_WORKSPACE_DIR}"; rm -f "$PLAN_FILE"; printf 'nochanges\n' > "$STATUS_FILE" ;;
+      2) log_info "destroy plan saved for ${TF_WORKSPACE_DIR} -> ${PLAN_FILE} (apply it to tear down)"; printf 'changed\n' > "$STATUS_FILE" ;;
+      *) log_error "terraform destroy-plan failed for ${TF_WORKSPACE_DIR} (exit ${code})"; exit "$code" ;;
+    esac
+    ;;
   *)
-    log_error "unknown action: ${ACTION} (expected plan|apply)"; exit 1 ;;
+    log_error "unknown action: ${ACTION} (expected plan|apply|destroy-plan)"; exit 1 ;;
 esac
