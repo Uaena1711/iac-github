@@ -17,6 +17,11 @@ inputs:
   default_region:
     description: Fallback AWS region when a workspace tf-ci.env omits AWS_REGION.
     default: ""
+  only_dir:
+    description: >-
+      Target a single workspace by path (skips git-diff). Used by the destroy flow to emit
+      a one-entry matrix for the chosen stack.
+    default: ""
 
 outputs:
   matrix:
@@ -37,6 +42,7 @@ runs:
         FORCE_ALL: ${{ inputs.force_all }}
         SHARED_PATHS: ${{ inputs.shared_paths }}
         DEFAULT_REGION: ${{ inputs.default_region }}
+        ONLY_DIR: ${{ inputs.only_dir }}
         BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         HEAD_SHA: ${{ github.sha }}
       run: sh "$GITHUB_ACTION_PATH/detect-changes.sh"

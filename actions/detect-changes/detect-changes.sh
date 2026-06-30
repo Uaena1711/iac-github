@@ -27,6 +27,7 @@ ROOT="${WORKSPACES_ROOT:-envs}"; ROOT="${ROOT%/}"
 MARKER="${WORKSPACE_MARKER:-provider.tf}"
 DEFAULT_REGION="${DEFAULT_REGION:-}"
 FORCE_ALL="${FORCE_ALL:-false}"
+ONLY_DIR="${ONLY_DIR:-}"; ONLY_DIR="${ONLY_DIR%/}"
 SHARED="$(printf '%s' "${SHARED_PATHS:-}" | tr -d '[]"' | tr ',' ' ')"
 cd "${GITHUB_WORKSPACE:-.}"
 
@@ -51,7 +52,7 @@ case "$base" in
 esac
 
 changed=""
-if [ "$select_all" -eq 0 ]; then
+if [ "$select_all" -eq 0 ] && [ -z "$ONLY_DIR" ]; then
   log "[info] diffing ${base}..${head}"
   # Distinguish "diff ran, no changes" (empty) from "diff FAILED" (unreachable base,
   # e.g. force-push). On failure, select all rather than silently applying nothing.
@@ -69,7 +70,10 @@ if [ "$select_all" -eq 0 ]; then
   fi
 fi
 
-if [ "$select_all" -eq 1 ]; then
+if [ -n "$ONLY_DIR" ]; then
+  log "[info] targeting single workspace: ${ONLY_DIR}"
+  dirs="$ONLY_DIR"
+elif [ "$select_all" -eq 1 ]; then
   dirs="$(list_all)"
 elif [ -n "$changed" ]; then
   dirs="$(printf '%s\n' "$changed" | while IFS= read -r f; do

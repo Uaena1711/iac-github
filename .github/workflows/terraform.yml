@@ -1,21 +1,30 @@
 # =============================================================================
-# iac-github :: reusable Terraform run flow  (the paved road)
+# iac-github :: reusable Terraform flow  (the paved road)
 #
-#     detect ──▶ plan (matrix, per-stack OIDC) ──▶ apply (matrix, env-gated) ──▶ check
+#   secret_scan ─┐
+#                ├─▶ plan ──▶ apply ──▶ check
+#   detect ──────┘
 #
-# A consumer calls this with a thin caller (see examples/caller-paved-road.yml).
-# PR  -> plan only.   push to main -> plan + apply (gated by GitHub Environments).
+# Layered: composes the Tier-1 building-block composite actions (secret-scan, detect-changes,
+# aws-oidc, tf-run). One flow handles BOTH deploy and destroy via `mode`:
+#   mode=deploy  (default) : plan changed workspaces -> apply on the default branch.
+#   mode=destroy           : destroy-plan the `dir` workspace -> apply (= teardown), gated.
+# PR = plan-only preview. Apply (deploy or destroy) is Environment-gated.
 #
-# NOTE on inner action refs: a reusable workflow's `uses: ./local` resolves against the
-# CALLER's repo, not this one — so the composite actions MUST be referenced by full path
-# `Uaena1711/iac-github/actions/<x>@<ref>`. Pinned to @v1 (the floating major moved by
-# release.yml). Bootstrap: before the first release exists, temporarily use @main.
+# Inner action refs are full-path @v1 (a reusable workflow's `./local` resolves against the
+# CALLER repo, not here). release.yml moves the floating v1.
 # =============================================================================
 name: terraform
 
 on:
   workflow_call:
     inputs:
+      mode:
+        type: string
+        default: "deploy"          # deploy | destroy
+      dir:
+        type: string
+        default: ""                # required when mode=destroy (workspace to tear down)
       workspaces_root:
         type: string
         default: "envs"
@@ -40,16 +49,41 @@ on:
       apply_max_parallel:
         type: number
         default: 1
+      var_file:
+        type: string
+        default: ""
+      tf_init_options:
+        type: string
+        default: ""
+      tf_plan_options:
+        type: string
+        default: ""
+      tf_apply_options:
+        type: string
+        default: ""
+      tf_destroy_options:
+        type: string
+        default: ""
 
-# Least privilege by default; only plan/apply opt into id-token: write below.
 permissions:
   contents: read
 
 concurrency:
-  group: tf-${{ github.ref }}
-  cancel-in-progress: false   # never cancel an in-flight apply
+  group: tf-${{ github.ref }}-${{ inputs.mode }}
+  cancel-in-progress: false        # never cancel an in-flight apply/destroy
 
 jobs:
+  # Tier-1 gate: scan for committed secrets before anything touches the cloud.
+  secret_scan:
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: Uaena1711/iac-github/actions/secret-scan@v1
+
   detect:
     runs-on: ${{ inputs.runs_on }}
     permissions:
@@ -58,9 +92,12 @@ jobs:
       matrix: ${{ steps.d.outputs.matrix }}
       has_changes: ${{ steps.d.outputs.has_changes }}
     steps:
+      - name: guard destroy target
+        if: inputs.mode == 'destroy' && inputs.dir == ''
+        run: echo "::error::mode=destroy requires the 'dir' input (the workspace to destroy)"; exit 1
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # full history for git diff
+          fetch-depth: 0
       - id: d
         uses: Uaena1711/iac-github/actions/detect-changes@v1
         with:
@@ -68,9 +105,11 @@ jobs:
           force_all: ${{ inputs.force_all }}
           shared_paths: ${{ inputs.shared_paths }}
           default_region: ${{ inputs.default_region }}
+          only_dir: ${{ inputs.mode == 'destroy' && inputs.dir || '' }}
 
+  # plan (deploy) or destroy-plan (destroy). Read-only preview; gated behind secret_scan.
   plan:
-    needs: detect
+    needs: [secret_scan, detect]
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ${{ inputs.runs_on }}
     permissions:
@@ -89,23 +128,29 @@ jobs:
           region: ${{ matrix.stack.region }}
       - uses: Uaena1711/iac-github/actions/tf-run@v1
         with:
-          command: plan
+          command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
           dir: ${{ matrix.stack.dir }}
           tf_version: ${{ inputs.tf_version }}
-          # Persist the plan only on the default branch (apply path). PR previews must not
-          # upload plan files (they embed state-derived secrets).
-          upload: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          var_file: ${{ inputs.var_file }}
+          tf_init_options: ${{ inputs.tf_init_options }}
+          tf_plan_options: ${{ inputs.tf_plan_options }}
+          tf_destroy_options: ${{ inputs.tf_destroy_options }}
+          # Persist the (deploy or destroy) plan only when an apply will consume it:
+          # destroy is always applied via dispatch; deploy applies on the default branch.
+          upload: ${{ inputs.mode == 'destroy' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
+  # Executes the saved plan (a create plan deploys; a destroy plan tears down).
   apply:
-    needs: [detect, plan]
+    needs: [secret_scan, detect, plan]
     if: >-
       needs.detect.outputs.has_changes == 'true' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      ( inputs.mode == 'destroy' ||
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch) )
     runs-on: ${{ inputs.runs_on }}
     permissions:
       id-token: write
       contents: read
-    environment: ${{ matrix.stack.environment }}   # gated iff that Environment has reviewers
+    environment: ${{ matrix.stack.environment }}   # approval gate (apply AND destroy)
     strategy:
       fail-fast: false
       max-parallel: ${{ inputs.apply_max_parallel }}
@@ -122,10 +167,12 @@ jobs:
           command: apply
           dir: ${{ matrix.stack.dir }}
           tf_version: ${{ inputs.tf_version }}
+          tf_init_options: ${{ inputs.tf_init_options }}
+          tf_apply_options: ${{ inputs.tf_apply_options }}
 
-  # Single, stable status for branch protection (matrix legs are dynamically named).
+  # Single TERMINAL status for branch protection — reflects the whole pipeline.
   check:
-    needs: [detect, plan]
+    needs: [secret_scan, detect, plan, apply]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -133,9 +180,9 @@ jobs:
     steps:
       - name: roll up results
         run: |
-          echo "detect=${{ needs.detect.result }} plan=${{ needs.plan.result }}"
+          echo "secret_scan=${{ needs.secret_scan.result }} detect=${{ needs.detect.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
           [ "${{ needs.detect.result }}" = "success" ] || { echo "detect failed"; exit 1; }
-          case "${{ needs.plan.result }}" in
-            success|skipped) echo "ok" ;;
-            *) echo "plan failed"; exit 1 ;;
-          esac
+          case "${{ needs.plan.result }}"  in success|skipped) ;; *) echo "plan failed";  exit 1 ;; esac
+          case "${{ needs.apply.result }}" in success|skipped) ;; *) echo "apply failed"; exit 1 ;; esac
+          echo "pipeline ok"
