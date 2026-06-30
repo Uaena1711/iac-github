@@ -1,0 +1,42 @@
+name: detect-changes
+description: Detect changed Terraform workspaces and emit a job matrix (JSON).
+
+inputs:
+  workspaces_root:
+    description: Directory scanned for workspaces.
+    default: "envs"
+  marker:
+    description: Marker file that defines a workspace.
+    default: "provider.tf"
+  force_all:
+    description: '"true" to select every workspace regardless of diff.'
+    default: "false"
+  shared_paths:
+    description: Space/comma list of paths; a change under any selects ALL workspaces.
+    default: ""
+  default_region:
+    description: Fallback AWS region when a workspace tf-ci.env omits AWS_REGION.
+    default: ""
+
+outputs:
+  matrix:
+    description: JSON array of {dir, role_arn, region, environment}.
+    value: ${{ steps.run.outputs.matrix }}
+  has_changes:
+    description: '"true" if any workspace changed (else "false").'
+    value: ${{ steps.run.outputs.has_changes }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: sh
+      env:
+        WORKSPACES_ROOT: ${{ inputs.workspaces_root }}
+        WORKSPACE_MARKER: ${{ inputs.marker }}
+        FORCE_ALL: ${{ inputs.force_all }}
+        SHARED_PATHS: ${{ inputs.shared_paths }}
+        DEFAULT_REGION: ${{ inputs.default_region }}
+        BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.sha }}
+      run: sh "$GITHUB_ACTION_PATH/detect-changes.sh"

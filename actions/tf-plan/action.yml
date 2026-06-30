@@ -1,0 +1,36 @@
+name: tf-plan
+description: terraform init + validate + plan for one workspace; uploads the plan artifact.
+
+inputs:
+  dir:
+    description: Workspace directory (relative to repo root).
+    required: true
+  tf_version:
+    description: Terraform version to install.
+    default: "1.15.7"
+  artifact_name:
+    description: Override plan artifact name (default plan-<dir-slug>).
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+        terraform_wrapper: false   # wrapper mangles `plan -detailed-exitcode` exit codes
+    - id: slug
+      shell: sh
+      run: |
+        printf 'name=%s\n' "$(printf '%s' "${{ inputs.artifact_name != '' && inputs.artifact_name || format('plan-{0}', inputs.dir) }}" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+    - shell: sh
+      env:
+        TF_WORKSPACE_DIR: ${{ inputs.dir }}
+      run: sh "$GITHUB_ACTION_PATH/../_lib/run.sh" plan
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.slug.outputs.name }}
+        path: ${{ inputs.dir }}/plan.tfplan
+        if-no-files-found: ignore
+        retention-days: 1
+        overwrite: true
