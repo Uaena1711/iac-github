@@ -1,0 +1,42 @@
+name: tf-lint
+description: Lint Terraform — `terraform fmt -check` + tflint (pinned + checksum-verified).
+
+# Building block (Tier 1). Cheap, no cloud access. The calling job just needs a checkout.
+inputs:
+  path:
+    description: Directory to lint recursively (default repo root — covers envs + modules).
+    default: "."
+  tf_version:
+    default: "1.15.7"
+  tflint_version:
+    default: "0.63.1"
+  tflint_sha256:
+    description: SHA256 of tflint_linux_amd64.zip (integrity pin).
+    default: "8441a7d97df20431f19c9b9d27ff4c63e308c964e86660bc7cc0cf7bbe0725e8"
+
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+        terraform_wrapper: false
+    - name: terraform fmt -check
+      shell: bash
+      env:
+        P: ${{ inputs.path }}
+      run: terraform fmt -check -recursive "$P"
+    - name: tflint
+      shell: bash
+      env:
+        V: ${{ inputs.tflint_version }}
+        SHA: ${{ inputs.tflint_sha256 }}
+        P: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        curl -fsSL -o tflint.zip \
+          "https://github.com/terraform-linters/tflint/releases/download/v${V}/tflint_linux_amd64.zip"
+        echo "${SHA}  tflint.zip" | sha256sum -c -
+        unzip -o -q tflint.zip tflint
+        # core ruleset (no provider plugins required); respects a repo .tflint.hcl if present
+        ( cd "$P" && "$OLDPWD/tflint" --recursive )
