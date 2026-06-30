@@ -3,6 +3,15 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 1.2.0
+
+- Add a `tf-lint` building block (`terraform fmt -check` + tflint, pinned + checksum) and
+  wire it into the flow as a gate alongside secret-scan: `secret_scan + lint → plan → apply → check`.
+- Fix: nested workspaces (e.g. `envs/<env>/<region>/`) now work in the change-detection
+  path — replaced a `case` inside command substitution (parser quirk on older shells) with
+  a portable prefix test. Detection maps a changed file to its nearest `provider.tf`
+  ancestor at any depth; the GitHub Environment is the first path segment under the root.
+
 ## 1.1.0
 
 - Layering: the terraform flow now composes a `secret-scan` (gitleaks) building block as a

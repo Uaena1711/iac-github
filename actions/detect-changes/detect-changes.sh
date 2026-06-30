@@ -76,9 +76,12 @@ if [ -n "$ONLY_DIR" ]; then
 elif [ "$select_all" -eq 1 ]; then
   dirs="$(list_all)"
 elif [ -n "$changed" ]; then
+  # Map each changed file (under ROOT/) to its nearest workspace. Prefix-test instead of
+  # `case` so this stays portable inside the command substitution.
   dirs="$(printf '%s\n' "$changed" | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    case "$f" in "$ROOT"/*) workspace_of "$f" || true ;; esac
+    [ "${f#"$ROOT"/}" != "$f" ] || continue
+    workspace_of "$f" || true
   done | sort -u)"
 else
   dirs=""

@@ -37,6 +37,9 @@ on:
       runs_on:
         type: string
         default: "ubuntu-latest"
+      lint_path:
+        type: string
+        default: "."
       force_all:
         type: boolean
         default: false
@@ -84,6 +87,18 @@ jobs:
           fetch-depth: 0
       - uses: Uaena1711/iac-github/actions/secret-scan@v1
 
+  # Tier-1 gate: terraform fmt -check + tflint (no cloud access).
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/tf-lint@v1
+        with:
+          path: ${{ inputs.lint_path }}
+          tf_version: ${{ inputs.tf_version }}
+
   detect:
     runs-on: ${{ inputs.runs_on }}
     permissions:
@@ -109,7 +124,7 @@ jobs:
 
   # plan (deploy) or destroy-plan (destroy). Read-only preview; gated behind secret_scan.
   plan:
-    needs: [secret_scan, detect]
+    needs: [secret_scan, lint, detect]
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ${{ inputs.runs_on }}
     permissions:
@@ -141,7 +156,7 @@ jobs:
 
   # Executes the saved plan (a create plan deploys; a destroy plan tears down).
   apply:
-    needs: [secret_scan, detect, plan]
+    needs: [secret_scan, lint, detect, plan]
     if: >-
       needs.detect.outputs.has_changes == 'true' &&
       ( inputs.mode == 'destroy' ||
@@ -172,7 +187,7 @@ jobs:
 
   # Single TERMINAL status for branch protection — reflects the whole pipeline.
   check:
-    needs: [secret_scan, detect, plan, apply]
+    needs: [secret_scan, lint, detect, plan, apply]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -180,8 +195,9 @@ jobs:
     steps:
       - name: roll up results
         run: |
-          echo "secret_scan=${{ needs.secret_scan.result }} detect=${{ needs.detect.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          echo "secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} detect=${{ needs.detect.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
           [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ] || { echo "lint failed"; exit 1; }
           [ "${{ needs.detect.result }}" = "success" ] || { echo "detect failed"; exit 1; }
           case "${{ needs.plan.result }}"  in success|skipped) ;; *) echo "plan failed";  exit 1 ;; esac
           case "${{ needs.apply.result }}" in success|skipped) ;; *) echo "apply failed"; exit 1 ;; esac

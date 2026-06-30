@@ -12,18 +12,18 @@ approval gating.
 
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
-| Building blocks (Tier 1) | `actions/{secret-scan,detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
+| Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
 | Paved road (Tier 2/3) | `.github/workflows/terraform.yml` (reusable workflow) | The whole standardized flow, wired |
 
 The paved-road flow composes the building blocks into:
 
 ```
 secret_scan (gitleaks) ─┐
-                        ├─▶ plan ─▶ apply ─▶ check
+lint (fmt + tflint) ────┼─▶ plan ─▶ apply ─▶ check
 detect ─────────────────┘
 ```
 
-Secret scanning runs as a gate before any cloud access. Use the paved road for the
+Secret scanning and lint (fmt + tflint) run as gates before any cloud access. Use the paved road for the
 standard flow; compose the actions directly when you need to override behavior. Both share
 the same building blocks (DRY, no lock-in).
 
@@ -67,7 +67,7 @@ jobs:
 - **Push to `main`** → deploy (plan + apply; protected Environments gate apply).
 - **Run workflow → mode: destroy + dir** → reviewed destroy-plan, gated, then teardown.
 
-👉 **Full working consumer:** [Uaena1711/iac-github-example](https://github.com/Uaena1711/iac-github-example)
+👉 **Full working consumer:** [Uaena1711/iac-github-terraform-example](https://github.com/Uaena1711/iac-github-terraform-example)
 — copy its layout (`envs/<env>/{provider.tf,main.tf,tf-ci.env}` + the caller) to get started.
 It also shows the full-override (composed) style.
 
