@@ -1,0 +1,20 @@
+# --- local-only AI artifacts — never committed ---
+plans/
+.claude/
+memory/
+CLAUDE.md
+docs/journals/
+docs/reports/
+docs/reviews/
+
+# --- terraform / runtime junk (examples + local runs) ---
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.*
+**/plan.tfplan
+**/.cfn-changeset
+
+# --- misc ---
+.DS_Store
+RELEASE_NOTES.md

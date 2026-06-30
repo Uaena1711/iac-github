@@ -1,0 +1,8 @@
+{
+  "name": "iac-github",
+  "maintainer": "iac-github maintainers",
+  "version": "0.1.0",
+  "variableLint": {
+    "exclude": []
+  }
+}
