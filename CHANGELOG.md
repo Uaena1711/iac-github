@@ -3,6 +3,17 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.0.0
+
+- **BREAKING:** replaced the matrix paved-road (`terraform.yml`) with a **per-environment
+  reusable workflow** `tf-env.yml`. The consumer calls it once per env and decides gating
+  per env (e.g. `dev` auto, `prod` approval). Each call is its own job graph, so a `prod`
+  awaiting approval never blocks `dev`. Migrate callers from one `terraform.yml` job to one
+  `tf-env.yml` job per env (see the example repo).
+- apply runs only when the plan has changes, so an unchanged env never fires its approval
+  gate (`tf-run` now exposes a `has_changes` output).
+- Building blocks unchanged: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `tf-run`.
+
 ## 1.2.0
 
 - Add a `tf-lint` building block (`terraform fmt -check` + tflint, pinned + checksum) and

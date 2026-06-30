@@ -13,33 +13,26 @@ approval gating.
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
 | Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
-| Paved road (Tier 2/3) | `.github/workflows/terraform.yml` (reusable workflow) | The whole standardized flow, wired |
+| Per-env flow (Tier 2) | `.github/workflows/tf-env.yml` (reusable workflow) | One environment, end-to-end |
 
-The paved-road flow composes the building blocks into:
+You call `tf-env.yml` **once per environment** and decide gating per env. Each call is its
+own job graph:
 
 ```
-secret_scan (gitleaks) ─┐
-lint (fmt + tflint) ────┼─▶ plan ─▶ apply ─▶ check
-detect ─────────────────┘
+secret_scan ─┐
+lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check     (per env)
+             ┘
 ```
 
-Secret scanning and lint (fmt + tflint) run as gates before any cloud access. Use the paved road for the
-standard flow; compose the actions directly when you need to override behavior. Both share
-the same building blocks (DRY, no lock-in).
+- Secret-scan + lint (fmt + tflint) gate before any cloud access.
+- `apply` runs **only when the plan has changes**, so an unchanged env never fires its gate.
+- **Gating = the env's GitHub Environment**: `dev` (no reviewers) applies automatically;
+  `prod` (required reviewers) waits for approval. A waiting `prod` never blocks `dev`,
+  because each env is a separate `tf-env.yml` call.
 
-### Deploy vs destroy (same flow)
+## Quick start
 
-One reusable workflow handles both via `mode`:
-
-- **deploy** (default): PR → plan preview; push to `main` → plan + apply.
-- **destroy**: run manually (`workflow_dispatch`) with `mode: destroy` and `dir: <workspace>`.
-  It builds a **destroy plan**, then `apply` executes that exact reviewed plan behind the
-  Environment approval — only what the plan captured is torn down (no blind
-  `terraform destroy -auto-approve`).
-
-## Quick start (paved road)
-
-`.github/workflows/terraform.yml` in your consumer repo:
+`.github/workflows/terraform.yml` in your consumer repo — **one job per env**:
 
 ```yaml
 name: terraform
@@ -49,27 +42,29 @@ on:
   workflow_dispatch:
     inputs:
       mode: { type: choice, options: [deploy, destroy], default: deploy }
-      dir:  { type: string, default: "" }   # workspace to destroy when mode=destroy
 permissions:
   id-token: write   # keyless OIDC
   contents: read
 jobs:
-  terraform:
-    uses: Uaena1711/iac-github/.github/workflows/terraform.yml@terraform/v1
-    with:
-      workspaces_root: envs
-      default_region: us-east-1
-      mode: ${{ inputs.mode || 'deploy' }}
-      dir:  ${{ inputs.dir  || '' }}
+  dev:
+    uses: Uaena1711/iac-github/.github/workflows/tf-env.yml@v1
+    with: { dir: envs/dev,  environment: dev,  mode: ${{ inputs.mode || 'deploy' }} }
+  prod:
+    uses: Uaena1711/iac-github/.github/workflows/tf-env.yml@v1
+    with: { dir: envs/prod, environment: prod, mode: ${{ inputs.mode || 'deploy' }} }
 ```
 
-- **Pull request** → plan only (preview).
-- **Push to `main`** → deploy (plan + apply; protected Environments gate apply).
-- **Run workflow → mode: destroy + dir** → reviewed destroy-plan, gated, then teardown.
+- **PR** → plan preview per env. **Push to `main`** → each env plans; `dev` applies
+  automatically; `prod` applies only after its Environment reviewer approves (and only if
+  prod actually changed).
+- **Destroy** → run manually with `mode: destroy`: a reviewed destroy-plan → Environment
+  gate → teardown (no blind `terraform destroy -auto-approve`).
+
+Pre-create the GitHub **Environments** (`dev`, `prod`, …) and add **required reviewers** to
+the ones you want gated. To deploy just one env, keep only that env's job (or gate the others).
 
 👉 **Full working consumer:** [Uaena1711/iac-github-terraform-example](https://github.com/Uaena1711/iac-github-terraform-example)
-— copy its layout (`envs/<env>/{provider.tf,main.tf,tf-ci.env}` + the caller) to get started.
-It also shows the full-override (composed) style.
+— copy its layout (`envs/<env>/{provider.tf,main.tf,tf-ci.env}`, a shared `modules/`, and the caller).
 
 ## Per-stack contract: `tf-ci.env`
 
@@ -83,8 +78,8 @@ AWS_STATE_BUCKET=<s3-bucket>                          # Terraform S3 backend (na
 AWS_STATE_KMS_KEY=<kms-key-arn>                       # SSE-KMS for state
 ```
 
-`detect-changes` reads these to build the job matrix; each matrix leg federates to its own
-role. No static cloud keys, ever.
+`tf-env` reads these (role/region) to federate that env's jobs to its own role. No static
+cloud keys, ever.
 
 ### One-time AWS trust policy (per role, set up outside this catalog)
 
@@ -143,9 +138,9 @@ private and restrict who can download Actions artifacts.
 SemVer git tags; `metadata.json` `version` is the source of truth. Released automatically
 on merge to `main`. Pin at the precision you want:
 
-- `@terraform/v1` — latest v1.x of the reusable workflow (floating major, recommended)
-- `@v1.2.3` — exact release
-- `@<sha>` — during bootstrapping, before the first release
+- `@v1` — latest major (floating, recommended); `@tf-env/v1` also tracks the workflow major
+- `@v2.0.0` — exact release
+- `@<sha>` — pin to a specific commit
 
 ## License
 
