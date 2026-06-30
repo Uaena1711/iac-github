@@ -1,0 +1,52 @@
+# Auto-release on main: metadata.json version drives a tag + GitHub release, then the
+# floating major/minor + per-component tags are moved. No-ops when the version is unchanged.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # create tags + releases
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: ver
+        name: resolve + validate version
+        run: echo "version=$(sh scripts/validate-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - id: gate
+        name: skip if tag already exists
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.ver.outputs.version }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v${{ steps.ver.outputs.version }} already released — nothing to do"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.exists == 'false'
+        name: extract release notes
+        run: sh scripts/extract-changelog.sh "${{ steps.ver.outputs.version }}" > RELEASE_NOTES.md
+
+      - if: steps.gate.outputs.exists == 'false'
+        name: create tag + release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          body_path: RELEASE_NOTES.md
+
+      - if: steps.gate.outputs.exists == 'false'
+        name: move floating + per-component tags
+        run: sh scripts/move-tags.sh "${{ steps.ver.outputs.version }}"
