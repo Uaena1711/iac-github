@@ -1,0 +1,14 @@
+name: selftest
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  terraform:
+    uses: ./.github/workflows/terraform.yml
+    with:
+      workspaces_root: examples/envs
+      default_region: us-east-1

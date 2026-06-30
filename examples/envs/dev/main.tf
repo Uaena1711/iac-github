@@ -4,5 +4,5 @@
 resource "aws_ssm_parameter" "demo" {
   name  = "/iac-github/demo/dev"
   type  = "String"
-  value = "hello-dev"
+  value = "hello-dev-live"
 }

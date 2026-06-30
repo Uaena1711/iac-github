@@ -3,6 +3,10 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 1.0.1
+
+- Live end-to-end test on a real runner (OIDC plan/apply, environments, release).
+
 ## 1.0.0
 
 - Initial release: Terraform run flow (detect → plan → apply).
