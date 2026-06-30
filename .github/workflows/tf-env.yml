@@ -74,14 +74,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - uses: Uaena1711/iac-github/actions/secret-scan@v1
+      - uses: Uaena1711/iac-github/actions/secret-scan@feat/per-env-path-b
 
   lint:
     runs-on: ${{ inputs.runs_on }}
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/tf-lint@v1
+      - uses: Uaena1711/iac-github/actions/tf-lint@feat/per-env-path-b
         with:
           path: ${{ inputs.lint_path }}
           tf_version: ${{ inputs.tf_version }}
@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: d
-        uses: Uaena1711/iac-github/actions/detect-changes@v1
+        uses: Uaena1711/iac-github/actions/detect-changes@feat/per-env-path-b
         with:
           only_dir: ${{ inputs.dir }}
           default_region: ${{ inputs.default_region }}
@@ -111,12 +111,12 @@ jobs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@v1
+      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/per-env-path-b
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
       - id: r
-        uses: Uaena1711/iac-github/actions/tf-run@v1
+        uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
         with:
           command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
           dir: ${{ inputs.dir }}
@@ -142,11 +142,11 @@ jobs:
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@v1
+      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/per-env-path-b
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
-      - uses: Uaena1711/iac-github/actions/tf-run@v1
+      - uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
         with:
           command: apply
           dir: ${{ inputs.dir }}
