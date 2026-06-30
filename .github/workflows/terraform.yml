@@ -1,0 +1,127 @@
+# =============================================================================
+# iac-github :: reusable Terraform run flow  (the paved road)
+#
+#     detect ──▶ plan (matrix, per-stack OIDC) ──▶ apply (matrix, env-gated) ──▶ check
+#
+# A consumer calls this with a thin caller (see examples/caller-paved-road.yml).
+# PR  -> plan only.   push to main -> plan + apply (gated by GitHub Environments).
+#
+# NOTE on inner action refs: a reusable workflow's `uses: ./local` resolves against the
+# CALLER's repo, not this one — so the composite actions MUST be referenced by full path
+# `Uaena1711/iac-github/actions/<x>@<ref>`. Pinned to @v1 (the floating major moved by
+# release.yml). Bootstrap: before the first release exists, temporarily use @main.
+# =============================================================================
+name: terraform
+
+on:
+  workflow_call:
+    inputs:
+      workspaces_root:
+        type: string
+        default: "envs"
+      tf_version:
+        type: string
+        default: "1.15.7"
+      default_region:
+        type: string
+        default: ""
+      runs_on:
+        type: string
+        default: "ubuntu-latest"
+      force_all:
+        type: boolean
+        default: false
+      shared_paths:
+        type: string
+        default: ""
+      plan_max_parallel:
+        type: number
+        default: 5
+      apply_max_parallel:
+        type: number
+        default: 1
+
+concurrency:
+  group: tf-${{ github.ref }}
+  cancel-in-progress: false   # never cancel an in-flight apply
+
+jobs:
+  detect:
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      matrix: ${{ steps.d.outputs.matrix }}
+      has_changes: ${{ steps.d.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # full history for git diff
+      - id: d
+        uses: Uaena1711/iac-github/actions/detect-changes@v1
+        with:
+          workspaces_root: ${{ inputs.workspaces_root }}
+          force_all: ${{ inputs.force_all }}
+          shared_paths: ${{ inputs.shared_paths }}
+          default_region: ${{ inputs.default_region }}
+
+  plan:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.plan_max_parallel }}
+      matrix:
+        stack: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v1
+        with:
+          role_arn: ${{ matrix.stack.role_arn }}
+          region: ${{ matrix.stack.region }}
+      - uses: Uaena1711/iac-github/actions/tf-plan@v1
+        with:
+          dir: ${{ matrix.stack.dir }}
+          tf_version: ${{ inputs.tf_version }}
+
+  apply:
+    needs: [detect, plan]
+    if: >-
+      needs.detect.outputs.has_changes == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ matrix.stack.environment }}   # gated iff that Environment has reviewers
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.apply_max_parallel }}
+      matrix:
+        stack: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v1
+        with:
+          role_arn: ${{ matrix.stack.role_arn }}
+          region: ${{ matrix.stack.region }}
+      - uses: Uaena1711/iac-github/actions/tf-apply@v1
+        with:
+          dir: ${{ matrix.stack.dir }}
+          tf_version: ${{ inputs.tf_version }}
+
+  # Single, stable status for branch protection (matrix legs are dynamically named).
+  check:
+    needs: [detect, plan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: roll up plan result
+        run: |
+          echo "detect=${{ needs.detect.result }} plan=${{ needs.plan.result }}"
+          case "${{ needs.plan.result }}" in
+            success|skipped) echo "ok" ;;
+            *) echo "plan failed"; exit 1 ;;
+          esac
