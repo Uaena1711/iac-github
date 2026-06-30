@@ -149,5 +149,4 @@ on merge to `main`. Pin at the precision you want:
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) — free for any noncommercial use
-(personal, hobby, research, evaluation). Commercial use is not granted.
+[MIT](LICENSE) — use it however you like.
