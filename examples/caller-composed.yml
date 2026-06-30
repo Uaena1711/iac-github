@@ -1,0 +1,52 @@
+# Full-override consumer: build your own flow from the composite building blocks when you
+# need to insert your own steps (cost estimate, PR comment, custom runner, extra gates).
+# This reproduces the paved-road plan job, with room for your own steps before/after.
+name: terraform (composed)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.d.outputs.matrix }}
+      has_changes: ${{ steps.d.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: d
+        uses: Uaena1711/iac-github/actions/detect-changes@v1
+        with:
+          workspaces_root: envs
+          default_region: us-east-1
+
+  plan:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      # --- your own pre-plan step here (e.g. infracost) ---
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v1
+        with:
+          role_arn: ${{ matrix.stack.role_arn }}
+          region: ${{ matrix.stack.region }}
+      - uses: Uaena1711/iac-github/actions/tf-plan@v1
+        with:
+          dir: ${{ matrix.stack.dir }}
+      # --- your own post-plan step here (e.g. comment the plan on the PR) ---
