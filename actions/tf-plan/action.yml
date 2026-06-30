@@ -21,8 +21,12 @@ runs:
         terraform_wrapper: false   # wrapper mangles `plan -detailed-exitcode` exit codes
     - id: slug
       shell: sh
+      env:
+        DIR_INPUT: ${{ inputs.dir }}
+        NAME_INPUT: ${{ inputs.artifact_name }}
       run: |
-        printf 'name=%s\n' "$(printf '%s' "${{ inputs.artifact_name != '' && inputs.artifact_name || format('plan-{0}', inputs.dir) }}" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+        name="${NAME_INPUT:-plan-${DIR_INPUT}}"
+        printf 'name=%s\n' "$(printf '%s' "$name" | tr '/' '-')" >> "$GITHUB_OUTPUT"
     - shell: sh
       env:
         TF_WORKSPACE_DIR: ${{ inputs.dir }}
@@ -30,7 +34,10 @@ runs:
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.slug.outputs.name }}
-        path: ${{ inputs.dir }}/plan.tfplan
-        if-no-files-found: ignore
-        retention-days: 1
+        # plan.status is always present (changed|nochanges); plan.tfplan only when changed.
+        path: |
+          ${{ inputs.dir }}/plan.tfplan
+          ${{ inputs.dir }}/plan.status
+        if-no-files-found: warn
+        retention-days: 5
         overwrite: true

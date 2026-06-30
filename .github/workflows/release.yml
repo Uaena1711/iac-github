@@ -23,7 +23,10 @@ jobs:
 
       - id: ver
         name: resolve + validate version
-        run: echo "version=$(sh scripts/validate-version.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(sh scripts/validate-version.sh)"
+          [ -n "$version" ] || { echo "version resolution failed"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - id: gate
         name: skip if tag already exists
@@ -46,6 +49,7 @@ jobs:
           tag_name: v${{ steps.ver.outputs.version }}
           name: v${{ steps.ver.outputs.version }}
           body_path: RELEASE_NOTES.md
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
 
       - if: steps.gate.outputs.exists == 'false'
         name: move floating + per-component tags

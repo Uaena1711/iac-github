@@ -118,9 +118,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: roll up plan result
+      - name: roll up results
         run: |
           echo "detect=${{ needs.detect.result }} plan=${{ needs.plan.result }}"
+          [ "${{ needs.detect.result }}" = "success" ] || { echo "detect failed"; exit 1; }
           case "${{ needs.plan.result }}" in
             success|skipped) echo "ok" ;;
             *) echo "plan failed"; exit 1 ;;

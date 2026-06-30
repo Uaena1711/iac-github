@@ -9,6 +9,12 @@
 set -eu
 
 VERSION="${1:?usage: move-tags.sh X.Y.Z}"
+
+# Prereleases (X.Y.Z-rc1) must NOT drag stable floating tags onto themselves.
+case "$VERSION" in
+  *-*) printf '[info] %s is a prerelease — not moving floating/major tags\n' "$VERSION" >&2; exit 0 ;;
+esac
+
 MAJOR="${VERSION%%.*}"
 REST="${VERSION#*.}"; MINOR="${REST%%.*}"
 SHA="$(git rev-parse HEAD)"

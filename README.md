@@ -62,7 +62,13 @@ role. No static cloud keys, ever.
 
 ### One-time AWS trust policy (per role, set up outside this catalog)
 
-Roles must trust GitHub's OIDC provider. Template (replace placeholders):
+> ⚠️ **Security — read this.** The `plan` job runs on **pull requests** with
+> `id-token: write` and assumes the role named in that workspace's `tf-ci.env` — a file
+> that is editable within a PR. Pin each role's trust-policy `sub` to your default branch
+> and/or a GitHub **Environment**, and **do not** trust the `pull_request` subject — or a
+> pull request could assume the role against live state / production.
+
+Apply role (pinned to `main` + Environments — recommended):
 
 ```json
 {
@@ -71,10 +77,20 @@ Roles must trust GitHub's OIDC provider. Template (replace placeholders):
   "Action": "sts:AssumeRoleWithWebIdentity",
   "Condition": {
     "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-    "StringLike": { "token.actions.githubusercontent.com:sub": "repo:<owner>/<repo>:*" }
+    "StringLike": {
+      "token.actions.githubusercontent.com:sub": [
+        "repo:<owner>/<repo>:ref:refs/heads/main",
+        "repo:<owner>/<repo>:environment:*"
+      ]
+    }
   }
 }
 ```
+
+For **PR plan previews** against real state, point `tf-ci.env`'s `AWS_ROLE_ARN` at a
+**separate least-privilege read/plan role** whose trust policy allows
+`repo:<owner>/<repo>:pull_request`, and keep the apply-capable role pinned as above.
+(A future enhancement may split plan-vs-apply role inputs so PRs never see the apply role.)
 
 ## Versioning & pinning
 

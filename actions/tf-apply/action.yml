@@ -21,13 +21,18 @@ runs:
         terraform_wrapper: false
     - id: slug
       shell: sh
+      env:
+        DIR_INPUT: ${{ inputs.dir }}
+        NAME_INPUT: ${{ inputs.artifact_name }}
       run: |
-        printf 'name=%s\n' "$(printf '%s' "${{ inputs.artifact_name != '' && inputs.artifact_name || format('plan-{0}', inputs.dir) }}" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+        name="${NAME_INPUT:-plan-${DIR_INPUT}}"
+        printf 'name=%s\n' "$(printf '%s' "$name" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+    # No continue-on-error: a missing artifact (expired/failed) must fail the job, not
+    # silently no-op. run.sh uses plan.status to skip cleanly on genuine no-change plans.
     - uses: actions/download-artifact@v4
       with:
         name: ${{ steps.slug.outputs.name }}
         path: ${{ inputs.dir }}
-      continue-on-error: true   # no artifact = plan had no changes = apply no-ops
     - shell: sh
       env:
         TF_WORKSPACE_DIR: ${{ inputs.dir }}

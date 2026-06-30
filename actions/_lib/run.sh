@@ -24,6 +24,7 @@ DIR="$(dirname -- "$0")"
 ACTION="${1:?usage: run.sh plan|apply}"
 : "${TF_WORKSPACE_DIR:?missing TF_WORKSPACE_DIR}"
 PLAN_FILE="${TF_PLAN_FILE:-plan.tfplan}"
+STATUS_FILE="${TF_PLAN_STATUS_FILE:-plan.status}"
 
 cd "${GITHUB_WORKSPACE:-.}/${TF_WORKSPACE_DIR}"
 
@@ -48,9 +49,14 @@ case "$ACTION" in
     code=$?
     set -e
     # -detailed-exitcode: 0 = no changes, 2 = changes present, 1 = error.
+    # Write an explicit status marker so the apply job can distinguish "plan had no
+    # changes" from "the expected plan artifact is missing/expired" (the latter must NOT
+    # silently no-op). The marker is always uploaded alongside the (optional) plan file.
     case "$code" in
-      0) log_info "no changes for ${TF_WORKSPACE_DIR}; removing plan so apply skips"; rm -f "$PLAN_FILE" ;;
-      2) log_info "changes detected for ${TF_WORKSPACE_DIR}; plan saved -> ${PLAN_FILE}" ;;
+      0) log_info "no changes for ${TF_WORKSPACE_DIR}; removing plan so apply skips"
+         rm -f "$PLAN_FILE"; printf 'nochanges\n' > "$STATUS_FILE" ;;
+      2) log_info "changes detected for ${TF_WORKSPACE_DIR}; plan saved -> ${PLAN_FILE}"
+         printf 'changed\n' > "$STATUS_FILE" ;;
       *) log_error "terraform plan failed for ${TF_WORKSPACE_DIR} (exit ${code})"; exit "$code" ;;
     esac
     ;;
@@ -60,8 +66,11 @@ case "$ACTION" in
       log_info "applying saved plan for ${TF_WORKSPACE_DIR}"
       # shellcheck disable=SC2086
       terraform apply -input=false ${TF_APPLY_OPTIONS:-} "$PLAN_FILE"
+    elif [ -f "$STATUS_FILE" ] && [ "$(cat "$STATUS_FILE")" = "nochanges" ]; then
+      log_warning "no changes for ${TF_WORKSPACE_DIR}; skipping apply"
     else
-      log_warning "no plan file for ${TF_WORKSPACE_DIR} (no changes); skipping apply"
+      log_error "expected plan for ${TF_WORKSPACE_DIR} is missing (artifact expired or download failed) — refusing to silently skip"
+      exit 1
     fi
     ;;
   *)

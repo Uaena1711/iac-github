@@ -53,13 +53,19 @@ esac
 changed=""
 if [ "$select_all" -eq 0 ]; then
   log "[info] diffing ${base}..${head}"
-  changed="$(git diff --name-only "$base" "$head" 2>/dev/null || true)"
-  if [ -n "$SHARED" ] && [ -n "$changed" ]; then
-    for sp in $SHARED; do
-      if printf '%s\n' "$changed" | grep -q "^${sp%/}/"; then
-        log "[info] shared path '${sp}' changed -> selecting all workspaces"; select_all=1; break
-      fi
-    done
+  # Distinguish "diff ran, no changes" (empty) from "diff FAILED" (unreachable base,
+  # e.g. force-push). On failure, select all rather than silently applying nothing.
+  if changed="$(git diff --name-only "$base" "$head" 2>/dev/null)"; then
+    if [ -n "$SHARED" ] && [ -n "$changed" ]; then
+      for sp in $SHARED; do
+        if printf '%s\n' "$changed" | grep -q "^${sp%/}/"; then
+          log "[info] shared path '${sp}' changed -> selecting all workspaces"; select_all=1; break
+        fi
+      done
+    fi
+  else
+    log "[warn] git diff failed (unreachable base SHA?) -> selecting all workspaces"
+    select_all=1
   fi
 fi
 
@@ -91,15 +97,19 @@ dirs="$(printf '%s' "$safe" | sed '/^$/d')"
 read_env() {
   f="$1/tf-ci.env"
   [ -f "$f" ] || return 0
-  grep -E "^${2}=" "$f" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'
+  grep -E "^${2}=" "$f" 2>/dev/null | head -1 | cut -d= -f2-
 }
+
+# Escape an arbitrary value for embedding inside a JSON string.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 json="["; first=1
 for d in $dirs; do
-  role="$(read_env "$d" AWS_ROLE_ARN)"
+  role="$(json_escape "$(read_env "$d" AWS_ROLE_ARN)")"
   region="$(read_env "$d" AWS_REGION)"; region="${region:-$DEFAULT_REGION}"
+  region="$(json_escape "$region")"
   rel="${d#"$ROOT"/}"; env="${rel%%/*}"; [ -n "$env" ] || env="default"
-  esc_d="$(printf '%s' "$d" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  esc_d="$(json_escape "$d")"
   obj="{\"dir\":\"${esc_d}\",\"role_arn\":\"${role}\",\"region\":\"${region}\",\"environment\":\"${env}\"}"
   if [ "$first" -eq 1 ]; then json="${json}${obj}"; first=0; else json="${json},${obj}"; fi
 done
