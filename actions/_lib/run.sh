@@ -28,14 +28,10 @@ STATUS_FILE="${TF_PLAN_STATUS_FILE:-plan.status}"
 
 cd "${GITHUB_WORKSPACE:-.}/${TF_WORKSPACE_DIR}"
 
-# Per-workspace identity / backend config (KEY=VALUE). This is the consumer's OWN repo
-# content running in their OWN job, so dot-sourcing is within their trust boundary.
-if [ -f tf-ci.env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ./tf-ci.env
-  set +a
-fi
+# Per-workspace identity / backend config. PARSED (allowlist), never dot-sourced —
+# tf-ci.env is PR-editable repo content and the plan job already holds assumed-role creds,
+# so executing it would be an RCE/credential-exfil primitive. See load_workspace_env().
+load_workspace_env tf-ci.env
 
 terraform --version
 

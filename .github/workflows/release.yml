@@ -30,17 +30,21 @@ jobs:
 
       - id: gate
         name: skip if tag already exists
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          if git rev-parse -q --verify "refs/tags/v${{ steps.ver.outputs.version }}" >/dev/null; then
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "v${{ steps.ver.outputs.version }} already released — nothing to do"
+            echo "v${VERSION} already released — nothing to do"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       - if: steps.gate.outputs.exists == 'false'
         name: extract release notes
-        run: sh scripts/extract-changelog.sh "${{ steps.ver.outputs.version }}" > RELEASE_NOTES.md
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: sh scripts/extract-changelog.sh "$VERSION" > RELEASE_NOTES.md
 
       - if: steps.gate.outputs.exists == 'false'
         name: create tag + release
@@ -53,4 +57,6 @@ jobs:
 
       - if: steps.gate.outputs.exists == 'false'
         name: move floating + per-component tags
-        run: sh scripts/move-tags.sh "${{ steps.ver.outputs.version }}"
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: sh scripts/move-tags.sh "$VERSION"

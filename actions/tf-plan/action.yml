@@ -11,6 +11,12 @@ inputs:
   artifact_name:
     description: Override plan artifact name (default plan-<dir-slug>).
     default: ""
+  upload:
+    description: >-
+      Upload the plan as an artifact for a later apply. Default "false" (secure):
+      plan files embed state-derived secrets, so they must NOT be persisted on PR
+      preview runs. The reusable workflow sets this "true" only on the default branch.
+    default: "false"
 
 runs:
   using: composite
@@ -31,10 +37,12 @@ runs:
       env:
         TF_WORKSPACE_DIR: ${{ inputs.dir }}
       run: sh "$GITHUB_ACTION_PATH/../_lib/run.sh" plan
-    - uses: actions/upload-artifact@v4
+    - if: inputs.upload == 'true'
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.slug.outputs.name }}
         # plan.status is always present (changed|nochanges); plan.tfplan only when changed.
+        # NOTE: plan files contain state-derived secrets — only uploaded on the apply path.
         path: |
           ${{ inputs.dir }}/plan.tfplan
           ${{ inputs.dir }}/plan.status

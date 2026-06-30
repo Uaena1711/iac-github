@@ -80,17 +80,37 @@ Apply role (pinned to `main` + Environments — recommended):
     "StringLike": {
       "token.actions.githubusercontent.com:sub": [
         "repo:<owner>/<repo>:ref:refs/heads/main",
-        "repo:<owner>/<repo>:environment:*"
+        "repo:<owner>/<repo>:environment:prod"
       ]
     }
   }
 }
 ```
 
+> ⚠️ **Bind to specific environments — do NOT use `environment:*`.** The apply job's
+> Environment is the workspace dir's first path segment, and GitHub auto-creates any
+> referenced Environment **without protection**. With a wildcard, someone could add a dir
+> `envs/unguarded/` (→ unprotected Environment `unguarded`) whose `tf-ci.env` names the prod
+> role and prod state, and apply it with no reviewer. Binding each role's trust to its own
+> `environment:<name>` means a stray environment can't assume the prod role.
+
+**Environment gating is your control plane:** pre-create every apply Environment
+(`dev`, `prod`, …) in repo settings and add **required reviewers** to the protected ones.
+An Environment that doesn't exist is created on first use with no protection.
+
 For **PR plan previews** against real state, point `tf-ci.env`'s `AWS_ROLE_ARN` at a
 **separate least-privilege read/plan role** whose trust policy allows
 `repo:<owner>/<repo>:pull_request`, and keep the apply-capable role pinned as above.
-(A future enhancement may split plan-vs-apply role inputs so PRs never see the apply role.)
+Note: `terraform plan` executes provider/data-source code from the PR, so the plan role
+must be read-only and PRs from outside contributors should require approval to run.
+
+### State bucket hardening (BYO)
+
+The S3 state bucket is yours to provision. Enable: **Block Public Access**, **versioning**,
+default **SSE-KMS** (set `AWS_STATE_KMS_KEY` so state uses a customer-managed key, not
+SSE-S3), and a **TLS-only** bucket policy. Plan artifacts (uploaded only on the default
+branch, 5-day retention) can contain state-derived secrets in cleartext — keep the repo
+private and restrict who can download Actions artifacts.
 
 ## Versioning & pinning
 

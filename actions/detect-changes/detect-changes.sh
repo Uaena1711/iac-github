@@ -80,16 +80,23 @@ else
   dirs=""
 fi
 
-# Injection guard: reject workspace dir names with chars outside a safe set, since the
-# name flows into JSON and later into a job matrix.
+# Iterate the (newline-separated) workspace list with globbing OFF and IFS pinned to
+# newline, so a dir name containing spaces/glob metacharacters can't field-split or
+# pathname-expand into a DIFFERENT (possibly more privileged) workspace before the guard.
+OLDIFS="$IFS"; IFS='
+'; set -f
+
+# Injection guard: reject workspace dir names with chars outside a safe set (and any
+# `..` traversal component), since the name flows into JSON, a job matrix, and a `cd`.
 safe=""
 for d in $dirs; do
   case "$d" in
-    "") : ;;
-    *[!A-Za-z0-9_/.-]*) log "[warn] skipping unsafe workspace dir name: $d" ;;
-    *) safe="${safe}${d}
-" ;;
+    "") continue ;;
+    *[!A-Za-z0-9_/.-]*) log "[warn] skipping unsafe workspace dir name: $d"; continue ;;
+    ..|../*|*/..|*/../*) log "[warn] skipping dir with .. traversal: $d"; continue ;;
   esac
+  safe="${safe}${d}
+"
 done
 dirs="$(printf '%s' "$safe" | sed '/^$/d')"
 
@@ -115,10 +122,15 @@ for d in $dirs; do
 done
 json="${json}]"
 
-has_changes=true
-[ "$first" -eq 1 ] && has_changes=false
+IFS="$OLDIFS"; set +f
 
-log "[info] has_changes=${has_changes} matrix=${json}"
+has_changes=true
+n=0
+[ "$first" -eq 1 ] && has_changes=false
+[ "$first" -eq 0 ] && n="$(printf '%s\n' "$dirs" | grep -c .)"
+
+# Don't dump the full matrix (it contains role ARNs / account ids) to the build log.
+log "[info] has_changes=${has_changes} (${n} workspace(s))"
 {
   printf 'matrix=%s\n' "$json"
   printf 'has_changes=%s\n' "$has_changes"

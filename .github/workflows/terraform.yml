@@ -41,6 +41,10 @@ on:
         type: number
         default: 1
 
+# Least privilege by default; only plan/apply opt into id-token: write below.
+permissions:
+  contents: read
+
 concurrency:
   group: tf-${{ github.ref }}
   cancel-in-progress: false   # never cancel an in-flight apply
@@ -48,6 +52,8 @@ concurrency:
 jobs:
   detect:
     runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.d.outputs.matrix }}
       has_changes: ${{ steps.d.outputs.has_changes }}
@@ -85,6 +91,9 @@ jobs:
         with:
           dir: ${{ matrix.stack.dir }}
           tf_version: ${{ inputs.tf_version }}
+          # Persist the plan only on the default branch (apply path). PR previews must not
+          # upload plan files (they embed state-derived secrets).
+          upload: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
   apply:
     needs: [detect, plan]
@@ -117,6 +126,8 @@ jobs:
     needs: [detect, plan]
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: roll up results
         run: |

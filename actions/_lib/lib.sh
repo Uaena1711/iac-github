@@ -6,6 +6,21 @@ log_error()   { printf '[error] %s\n' "$1" >&2; }
 log_info()    { printf '[info] %s\n'  "$1"; }
 log_warning() { printf '[warn] %s\n'  "$1"; }
 
+# Load a workspace's tf-ci.env by PARSING an allowlist of KEY=VALUE lines — never by
+# dot-sourcing it. tf-ci.env is repo content (PR-editable); sourcing it would execute
+# arbitrary shell in a job that holds assumed-role credentials. We export only the keys
+# the backend/run logic needs; anything else in the file is ignored.
+load_workspace_env() {
+  f="${1:-tf-ci.env}"
+  [ -f "$f" ] || return 0
+  for key in AWS_ROLE_ARN AWS_REGION AWS_STATE_BUCKET AWS_STATE_REGION \
+             AWS_STATE_KMS_KEY AWS_STATE_ENCRYPTION_KEY AWS_STATE_LOCK_TABLE \
+             TF_STATE_KEY TF_STATE_PREFIX TF_STATE_ENABLED; do
+    val="$(grep -E "^${key}=" "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+    [ -n "$val" ] && export "${key}=${val}"
+  done
+}
+
 # Remote-state object key for THIS workspace (S3). Partitions state per repo + workspace
 # so one bucket holds many workspaces. Override TF_STATE_KEY (in tf-ci.env) to pin.
 resolve_tf_state_key() {
@@ -37,12 +52,12 @@ tf_backend_init() {
          -backend-config="encrypt=true" \
          -backend-config="use_lockfile=true"
   if [ -n "${AWS_STATE_KMS_KEY:-}" ]; then
-    log_info "state encryption: SSE-KMS (${AWS_STATE_KMS_KEY})"
+    log_info "state encryption: SSE-KMS"
     set -- "$@" -backend-config="kms_key_id=${AWS_STATE_KMS_KEY}"
   else
-    log_warning "default SSE-S3 — set AWS_STATE_KMS_KEY for a managed key"
+    log_warning "default SSE-S3 — set AWS_STATE_KMS_KEY for a customer-managed key"
   fi
-  log_info "S3 backend: s3://${AWS_STATE_BUCKET}/${TF_STATE_KEY}"
+  log_info "S3 backend initialised (state key: ${TF_STATE_KEY})"
   # shellcheck disable=SC2086
   terraform init -input=false ${TF_INIT_OPTIONS:-} "$@"
 }

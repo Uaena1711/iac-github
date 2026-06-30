@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Keep third-party action versions current (and surface SHA bumps for review).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -17,4 +17,5 @@ jobs:
     with:
       workspaces_root: envs
       default_region: us-east-1
-    secrets: inherit
+    # No `secrets: inherit` — the flow is fully keyless (OIDC). Pass secrets explicitly
+    # only if you add a step that needs one.
