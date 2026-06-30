@@ -12,7 +12,7 @@ approval gating.
 
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
-| Building blocks | `actions/{detect-changes,aws-oidc,tf-plan,tf-apply}` (composite) | Reusable steps you can compose yourself |
+| Building blocks | `actions/{detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
 | Paved road | `.github/workflows/terraform.yml` (reusable workflow) | The whole standardized flow, wired |
 
 Use the paved road for the standard flow; compose the actions directly when you need to

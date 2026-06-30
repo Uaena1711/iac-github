@@ -22,7 +22,7 @@ SHA="$(git rev-parse HEAD)"
 # Floating tag -> reusable workflow / whole catalog.
 TAGS="v${MAJOR} v${MAJOR}.${MINOR}"
 # Per-component directory-scoped majors (one version stream drives all for now).
-for c in terraform tf-plan tf-apply aws-oidc detect-changes; do
+for c in terraform tf-run aws-oidc detect-changes; do
   TAGS="${TAGS} ${c}/v${MAJOR}"
 done
 

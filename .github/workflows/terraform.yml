@@ -87,8 +87,9 @@ jobs:
         with:
           role_arn: ${{ matrix.stack.role_arn }}
           region: ${{ matrix.stack.region }}
-      - uses: Uaena1711/iac-github/actions/tf-plan@v1
+      - uses: Uaena1711/iac-github/actions/tf-run@v1
         with:
+          command: plan
           dir: ${{ matrix.stack.dir }}
           tf_version: ${{ inputs.tf_version }}
           # Persist the plan only on the default branch (apply path). PR previews must not
@@ -116,8 +117,9 @@ jobs:
         with:
           role_arn: ${{ matrix.stack.role_arn }}
           region: ${{ matrix.stack.region }}
-      - uses: Uaena1711/iac-github/actions/tf-apply@v1
+      - uses: Uaena1711/iac-github/actions/tf-run@v1
         with:
+          command: apply
           dir: ${{ matrix.stack.dir }}
           tf_version: ${{ inputs.tf_version }}
 
