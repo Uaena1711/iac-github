@@ -31,7 +31,10 @@ the same building blocks (DRY, no lock-in).
 
 One reusable workflow handles both via `mode`:
 
-- **deploy** (default): PR → plan preview; push to `main` → plan + apply.
+- **deploy** (default): PR → plan preview; push to `main` → plan + apply **only the changed
+  workspaces** (a dev-only change never involves prod). To deploy one env on demand, run it
+  manually with `mode: deploy` + `dir: envs/dev` — that skips the diff and targets only dev,
+  so prod is never pulled into the run (and never sits on its approval gate).
 - **destroy**: run manually (`workflow_dispatch`) with `mode: destroy` and `dir: <workspace>`.
   It builds a **destroy plan**, then `apply` executes that exact reviewed plan behind the
   Environment approval — only what the plan captured is torn down (no blind

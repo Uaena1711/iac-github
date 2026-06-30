@@ -3,6 +3,13 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 1.3.0
+
+- Targeted deploy: `dir` now scopes a **deploy** too (not just destroy). Run with
+  `mode: deploy, dir: envs/dev` to deploy ONE workspace and skip the diff — so a prod stack
+  is never pulled into the matrix (and never sits on its approval gate) when you only want dev.
+  Empty `dir` on deploy keeps the normal "diff all changed workspaces" behaviour.
+
 ## 1.2.0
 
 - Add a `tf-lint` building block (`terraform fmt -check` + tflint, pinned + checksum) and

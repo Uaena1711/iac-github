@@ -24,7 +24,8 @@ on:
         default: "deploy"          # deploy | destroy
       dir:
         type: string
-        default: ""                # required when mode=destroy (workspace to tear down)
+        default: ""                # target ONE workspace: deploy just it (skips diff), or
+                                   # the destroy target. Empty + deploy = diff all changed.
       workspaces_root:
         type: string
         default: "envs"
@@ -120,7 +121,9 @@ jobs:
           force_all: ${{ inputs.force_all }}
           shared_paths: ${{ inputs.shared_paths }}
           default_region: ${{ inputs.default_region }}
-          only_dir: ${{ inputs.mode == 'destroy' && inputs.dir || '' }}
+          # `dir` targets a single workspace for BOTH modes: deploy just one env (skips the
+          # diff so prod is never pulled in), or pick the destroy target. Empty deploy = diff.
+          only_dir: ${{ inputs.dir }}
 
   # plan (deploy) or destroy-plan (destroy). Read-only preview; gated behind secret_scan.
   plan:
