@@ -46,7 +46,8 @@ jobs:
         with:
           role_arn: ${{ matrix.stack.role_arn }}
           region: ${{ matrix.stack.region }}
-      - uses: Uaena1711/iac-github/actions/tf-plan@v1
+      - uses: Uaena1711/iac-github/actions/tf-run@v1
         with:
+          command: plan
           dir: ${{ matrix.stack.dir }}
       # --- your own post-plan step here (e.g. comment the plan on the PR) ---

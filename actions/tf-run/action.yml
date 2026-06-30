@@ -1,7 +1,10 @@
-name: tf-plan
-description: terraform init + validate + plan for one workspace; uploads the plan artifact.
+name: tf-run
+description: terraform plan or apply for one workspace (self-contained; per-stack backend).
 
 inputs:
+  command:
+    description: plan | apply
+    required: true
   dir:
     description: Workspace directory (relative to repo root).
     required: true
@@ -13,9 +16,9 @@ inputs:
     default: ""
   upload:
     description: >-
-      Upload the plan as an artifact for a later apply. Default "false" (secure):
-      plan files embed state-derived secrets, so they must NOT be persisted on PR
-      preview runs. The reusable workflow sets this "true" only on the default branch.
+      (plan only) Upload the plan as an artifact for a later apply. Default "false"
+      (secure): plan files embed state-derived secrets, so the reusable workflow sets
+      this "true" only on the default branch — never on PR preview runs.
     default: "false"
 
 runs:
@@ -25,6 +28,7 @@ runs:
       with:
         terraform_version: ${{ inputs.tf_version }}
         terraform_wrapper: false   # wrapper mangles `plan -detailed-exitcode` exit codes
+
     - id: slug
       shell: sh
       env:
@@ -33,16 +37,26 @@ runs:
       run: |
         name="${NAME_INPUT:-plan-${DIR_INPUT}}"
         printf 'name=%s\n' "$(printf '%s' "$name" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+    # apply: fetch the plan. No continue-on-error — a missing artifact must fail (not no-op).
+    - if: inputs.command == 'apply'
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ steps.slug.outputs.name }}
+        path: ${{ inputs.dir }}
+
     - shell: sh
       env:
+        COMMAND: ${{ inputs.command }}
         TF_WORKSPACE_DIR: ${{ inputs.dir }}
-      run: sh "$GITHUB_ACTION_PATH/../_lib/run.sh" plan
-    - if: inputs.upload == 'true'
+      run: sh "$GITHUB_ACTION_PATH/run.sh" "$COMMAND"
+
+    # plan: persist plan.tfplan + plan.status (only when upload=true, i.e. default branch).
+    - if: inputs.command == 'plan' && inputs.upload == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.slug.outputs.name }}
-        # plan.status is always present (changed|nochanges); plan.tfplan only when changed.
-        # NOTE: plan files contain state-derived secrets — only uploaded on the apply path.
+        # plan files contain state-derived secrets — only uploaded on the apply path.
         path: |
           ${{ inputs.dir }}/plan.tfplan
           ${{ inputs.dir }}/plan.status
