@@ -15,7 +15,9 @@
 # runs when the change set has changes, so an unchanged prod never fires its gate. Identity
 # (role/region) + stack config are read from the stack's cfn-ci.env.
 #
-# Every job runs in a container by default (deploy jobs -> amazon/aws-cli; lint -> python).
+# The deploy jobs default to the runner HOST (GitHub runners preinstall the AWS CLI + jq + git),
+# so there's nothing to containerize; secret_scan/lint default to purpose-built images. Point the
+# *_image inputs at an AWS-capable image (that also has git or tar for checkout) to containerize.
 # Inner action refs are full-path @v2 (a reusable workflow's `./local` resolves against the
 # CALLER repo). release.yml moves the floating v2.
 # =============================================================================
@@ -49,13 +51,13 @@ on:
         default: "python:3.12-slim"                  # cfn-lint auto-installs via pip
       resolve_image:
         type: string
-        default: "amazon/aws-cli:2.35.13"            # aws + git; jq auto-installs (github provider)
+        default: ""                                  # host: runner ships aws + jq + git
       plan_image:
         type: string
-        default: "amazon/aws-cli:2.35.13"            # aws CLI; jq auto-installs
+        default: ""                                  # host: runner ships aws + jq + git
       apply_image:
         type: string
-        default: "amazon/aws-cli:2.35.13"            # aws CLI; jq auto-installs
+        default: ""                                  # host: runner ships aws + jq + git
       default_region:
         type: string
         default: ""
