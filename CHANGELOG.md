@@ -3,6 +3,15 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.1.0
+
+- Optional **container execution**: `tf-env.yml` and `tf-docs.yml` take a `container_image`
+  input — set it to run the jobs inside your own image (must be **glibc/Debian-based**;
+  Alpine breaks GitHub's in-container Node). Default `""` = run on the runner host (unchanged).
+- Building-block tools now **install only if missing**, so a container image that already
+  ships `terraform` / `tflint` / `gitleaks` / `terraform-docs` is reused instead of
+  reinstalled; on the bare host the pinned versions install as before. Backward-compatible.
+
 ## 2.0.0
 
 - **BREAKING:** replaced the matrix paved-road (`terraform.yml`) with a **per-environment

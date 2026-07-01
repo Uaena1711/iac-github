@@ -61,12 +61,37 @@ ones you want gated. To deploy just one env, keep only that env's job.
 | `environment` | *(required)* | GitHub Environment used for the apply gate. |
 | `mode` | `deploy` | `deploy` or `destroy` (reviewed destroy-plan behind the gate). |
 | `secrets_provider` | `""` | Override each env's file-level `SECRETS_PROVIDER` (`github` \| `awssm` \| `none`). |
-| `tf_version` | `1.15.7` | Terraform version. |
+| `container_image` | `""` | Run the jobs inside this image (empty = the runner host). See [Running in a container](#running-in-a-container). |
+| `tf_version` | `1.15.7` | Terraform version (used only when installing on the host / an image without terraform). |
 | `default_region` | `""` | Fallback AWS region when a stack's `tf-ci.env` omits `AWS_REGION`. |
 | `runs_on` | `ubuntu-latest` | Runner label. |
 | `lint_path` | `.` | Directory linted (fmt + tflint). |
 | `var_file` | `""` | Optional `-var-file` (relative to the workspace). |
 | `tf_init_options` / `tf_plan_options` / `tf_apply_options` / `tf_destroy_options` | `""` | Extra flags appended to the respective Terraform command. |
+
+## Running in a container
+
+By default jobs run on the runner host (`ubuntu-latest`) and each tool is installed at its
+pinned version. Set `container_image` to run every job inside your own image instead:
+
+```yaml
+jobs:
+  dev:
+    uses: Uaena1711/iac-github/.github/workflows/tf-env.yml@v2
+    with:
+      dir: envs/dev
+      environment: dev
+      container_image: ghcr.io/you/tf-toolbox:1.15.7   # your pinned toolchain
+```
+
+- The image **must be glibc-based** (Debian/Ubuntu). Alpine/musl images break GitHub's
+  in-container Node, so `actions/checkout` and friends fail.
+- Tools are **installed only if missing**: if the image already has `terraform`, `tflint`,
+  `gitleaks`, or `terraform-docs`, they're reused (no reinstall); anything absent is
+  installed at the pin. `resolve-env` also needs `jq` (and `aws` for the `awssm` provider) —
+  include them in your image.
+- Consumers of a reusable workflow can't set `container:` on the calling job; the
+  `container_image` **input** is the override.
 
 ## Per-stack contract: `tf-ci.env`
 

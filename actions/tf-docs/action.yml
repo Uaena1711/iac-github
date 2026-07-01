@@ -28,6 +28,11 @@ runs:
         SHA: ${{ inputs.sha256 }}
       run: |
         set -euo pipefail
+        # Reuse a terraform-docs baked into the job's container image; else install the pin.
+        if command -v terraform-docs >/dev/null 2>&1; then
+          echo "[tf-docs] using preinstalled terraform-docs: $(terraform-docs --version 2>/dev/null || echo '?')"
+          exit 0
+        fi
         curl -fsSL -o tfdocs.tgz \
           "https://github.com/terraform-docs/terraform-docs/releases/download/v${V}/terraform-docs-v${V}-linux-amd64.tar.gz"
         echo "${SHA}  tfdocs.tgz" | sha256sum -c -

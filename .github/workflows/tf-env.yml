@@ -35,6 +35,9 @@ on:
       secrets_provider:
         type: string
         default: ""                    # override each env's file-level SECRETS_PROVIDER (github | awssm | none)
+      container_image:
+        type: string
+        default: ""                    # run jobs in this image (GLIBC/Debian-based; empty = on the runner host)
       tf_version:
         type: string
         default: "1.15.7"
@@ -73,6 +76,7 @@ concurrency:
 jobs:
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
@@ -81,6 +85,7 @@ jobs:
 
   lint:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
@@ -92,6 +97,7 @@ jobs:
   # Resolve this env's identity (role/region) from its tf-ci.env.
   resolve:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions: { contents: read }
     outputs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
@@ -116,6 +122,7 @@ jobs:
   plan:
     needs: [secret_scan, lint, resolve]
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions:
       id-token: write
       contents: read
@@ -168,6 +175,7 @@ jobs:
       ( inputs.mode == 'destroy' ||
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch) )
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions:
       id-token: write
       contents: read

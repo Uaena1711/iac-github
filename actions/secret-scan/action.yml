@@ -19,8 +19,15 @@ runs:
         SHA: ${{ inputs.gitleaks_sha256 }}
       run: |
         set -euo pipefail
-        curl -fsSL -o gitleaks.tar.gz \
-          "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
-        echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
-        tar -xzf gitleaks.tar.gz gitleaks
-        ./gitleaks detect --source . --redact --no-banner --exit-code 1
+        # Reuse a gitleaks baked into the job's container image; otherwise install the pin.
+        if command -v gitleaks >/dev/null 2>&1; then
+          echo "[secret-scan] using preinstalled gitleaks: $(gitleaks version 2>/dev/null || echo '?')"
+          GITLEAKS=gitleaks
+        else
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
+          echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          GITLEAKS="$PWD/gitleaks"
+        fi
+        "$GITLEAKS" detect --source . --redact --no-banner --exit-code 1

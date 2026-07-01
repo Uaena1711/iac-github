@@ -26,6 +26,9 @@ on:
       version:
         type: string
         default: "0.24.0"
+      container_image:
+        type: string
+        default: ""                # run in this image (GLIBC/Debian-based; empty = runner host)
       runs_on:
         type: string
         default: "ubuntu-latest"
@@ -36,6 +39,7 @@ permissions:
 jobs:
   docs:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions:
       contents: write            # commit the regenerated READMEs back to the branch
     steps:
