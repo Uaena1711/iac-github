@@ -5,6 +5,14 @@ This file lists changes to the iac-github Actions catalog. Versioning follows Se
 
 ## 2.3.0
 
+- `cfn-run` **prints the change-set resource diff** in the `plan` job (Add/Modify/Remove per
+  resource, with `[REPLACEMENT]` and scope) to the log **and renders it as a table on the run's
+  Summary page** — so a reviewer sees what apply will change before approving the gate (the
+  `terraform plan` / GitLab `view_changes` equivalent).
+- `cfn-run` resolves `TEMPLATE` and `PARAMETERS` **from the repo root** (not the stack dir), so all
+  environments can **share ONE template** (`templates/app.yaml`) instead of copying it per env;
+  per-env differences live in `parameters.json` / `cfn-params.env`. Paths are still validated
+  (no `/`, no `..`) so nothing escapes the repo.
 - Add [`checkout-artifact`](actions/checkout-artifact) (Tier 1): a shared building block that
   uploads the checked-out source as a per-env artifact (`mode: upload`) and restores it in later
   jobs (`mode: download`). One place for the source-passing policy (artifact naming, hidden-file

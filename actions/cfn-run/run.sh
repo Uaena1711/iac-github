@@ -63,10 +63,11 @@ load_workspace_env() {
 
 # TEMPLATE / PARAMETERS come from the PR-editable cfn-ci.env and become a `file://` read, so a
 # crafted `../../etc/x` or absolute path could read an arbitrary runner file into the CFN API
-# (and leak it via a parse-error StatusReason). Require a repo-relative, traversal-free path.
+# (and leak it via a parse-error StatusReason). Require a repo-root-relative, traversal-free path
+# (so a shared templates/app.yaml is fine, but nothing escapes the checked-out repo).
 require_safe_path() {
   case "$1" in
-    /*)                die "${2} '${1}' must be a path relative to the stack dir (no leading /)" ;;
+    /*)                die "${2} '${1}' must be a path relative to the repo root (no leading /)" ;;
     ..|../*|*/..|*/../*) die "${2} '${1}' must not traverse with '..'" ;;
     *[!A-Za-z0-9_/.-]*) die "${2} '${1}' has unsafe characters" ;;
   esac
@@ -132,6 +133,7 @@ stack_status() {
 # approving the gate (the `terraform plan` equivalent). Input: the describe-change-set JSON.
 render_change_set() {
   _n="$(printf '%s' "$1" | jq -r '.Changes | length')"
+  # Plain console diff (shows in the job log).
   log_info "----- change set ${cs} (${cstype}) for ${STACK_NAME}: ${_n} resource change(s) -----"
   printf '%s' "$1" | jq -r '
     .Changes[]?.ResourceChange
@@ -141,19 +143,41 @@ render_change_set() {
          elif .Replacement=="Conditional" then "  [may replace]" else "" end)
       + (if ((.Scope // []) | length) > 0 then "  scope=" + (.Scope | join(",")) else "" end)'
   log_info "----- end change set -----"
+
+  # Visual table on the run's Summary page (easier to review than the console).
+  # Backticks below are literal markdown; %s expands via printf args, not the shell.
+  # shellcheck disable=SC2016
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      printf '### CloudFormation change set — `%s` (%s)\n\n' "$STACK_NAME" "$cstype"
+      printf '%s resource change(s) · change set `%s`\n\n' "$_n" "$cs"
+      printf '|  | Action | Logical ID | Type | Replacement | Scope |\n'
+      printf '|---|---|---|---|---|---|\n'
+      printf '%s' "$1" | jq -r '
+        .Changes[]?.ResourceChange
+        | (({"Add":"➕","Modify":"✏️","Remove":"➖","Import":"📥","Dynamic":"❔"})[.Action] // "❔") as $s
+        | "| " + $s + " | " + .Action + " | `" + .LogicalResourceId + "` | " + .ResourceType
+          + " | " + (.Replacement // "—") + " | " + ((.Scope // []) | join(", ")) + " |"'
+      printf '\n'
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 ACTION="${COMMAND:?usage: run.sh plan|apply|destroy-plan|destroy}"
 : "${CFN_WORKSPACE_DIR:?missing CFN_WORKSPACE_DIR}"
-STATUS_FILE="changeset.status"
-NAME_FILE="changeset.name"
-TYPE_FILE="changeset.type"
+# changeset.* are per-stack (kept under the stack dir so the artifact hand-off stays dir-scoped).
+STATUS_FILE="${CFN_WORKSPACE_DIR}/changeset.status"
+NAME_FILE="${CFN_WORKSPACE_DIR}/changeset.name"
+TYPE_FILE="${CFN_WORKSPACE_DIR}/changeset.type"
 
-cd "${GITHUB_WORKSPACE:-.}/${CFN_WORKSPACE_DIR}"
+# Operate from the REPO ROOT so TEMPLATE / PARAMETERS can be repo-relative paths — a stack can
+# point at a SHARED template (e.g. templates/app.yaml) instead of a per-env copy (see docs). The
+# stack dir just holds cfn-ci.env / cfn-params.env / parameters.json.
+cd "${GITHUB_WORKSPACE:-.}"
 # TEMPLATE_BUCKET comes ONLY from the base-branch workflow input (set as env by the action),
 # never from the PR-editable cfn-ci.env — so a PR can't redirect `package` uploads to another
 # bucket. It is therefore NOT in load_workspace_env's allowlist.
-load_workspace_env cfn-ci.env
+load_workspace_env "${CFN_WORKSPACE_DIR}/cfn-ci.env"
 : "${STACK_NAME:?set STACK_NAME in the stack cfn-ci.env}"
 : "${AWS_REGION:?set AWS_REGION in the stack cfn-ci.env}"
 aws --version

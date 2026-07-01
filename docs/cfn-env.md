@@ -14,7 +14,10 @@ lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ c
 - secret-scan (gitleaks) + lint (cfn-lint, static — no credentials) gate before any cloud access.
 - **The change set is the plan.** `plan` creates and describes a CloudFormation change set (it
   executes nothing); `apply` executes the exact saved change set. You deploy only what a reviewer
-  approved — never a blind immediate `aws cloudformation deploy`.
+  approved — never a blind immediate `aws cloudformation deploy`. The `plan` job **prints the
+  resource diff** (Add/Modify/Remove, `[REPLACEMENT]`, scope) to the log **and renders it as a
+  table on the run's Summary page**, so a reviewer sees exactly what apply will change before
+  approving the gate.
 - `apply` runs **only when the change set has changes**, so an unchanged env never fires its gate.
 - **Gating = the env's GitHub Environment**: `dev` (no reviewers) applies automatically;
   `prod` (required reviewers) waits for approval. A waiting `prod` never blocks `dev`, because
@@ -102,15 +105,27 @@ the stack) carrying its identity and deploy config:
 AWS_ROLE_ARN=arn:aws:iam::<account-id>:role/<role>   # role this stack's jobs assume (keyless OIDC)
 AWS_REGION=us-east-1
 STACK_NAME=my-app-dev                                 # CloudFormation stack name
-TEMPLATE=template.yaml                                 # template file (relative to this dir)
-PARAMETERS=parameters.json                             # native CFN parameter file (committed, non-secret)
+TEMPLATE=templates/app.yaml                            # repo-root-relative -> SHARE one template across envs
+PARAMETERS=stacks/dev/parameters.json                 # repo-root-relative, per-env, non-secret
 CAPABILITIES=CAPABILITY_NAMED_IAM                      # optional; space-separated list
 TAGS=Key=env,Value=dev                                 # optional; space-separated Key=..,Value=.. list
 ```
 
-`TEMPLATE` and `PARAMETERS` must be **repo-relative, `..`-free paths** inside the stack dir
-(validated). To package nested stacks / inline Lambda, set the `template_bucket` **workflow
-input** (it is deliberately NOT read from `cfn-ci.env`, so a PR can't redirect uploads).
+**`TEMPLATE` and `PARAMETERS` are resolved from the repo root** (validated: no leading `/`, no
+`..` — so they can't escape the checked-out repo). This is deliberate so **all environments share
+ONE template** — don't copy a template into each env dir. The recommended layout mirrors the
+common CloudFormation convention (a central `templates/` dir + per-env config):
+
+```
+templates/app.yaml                 # the shared template (referenced by every env)
+stacks/dev/{cfn-ci.env, parameters.json, cfn-params.env}
+stacks/prod/{cfn-ci.env, parameters.json, cfn-params.env}
+```
+
+Per-environment differences live in `parameters.json` (e.g. an `EnvName` parameter, sizes via
+template `Mappings`) and in the sensitive `cfn-params.env` — never in a forked template. To package
+nested stacks / inline Lambda, set the `template_bucket` **workflow input** (deliberately NOT read
+from `cfn-ci.env`, so a PR can't redirect uploads).
 
 `cfn-env` reads role/region to federate that stack's jobs to its own role. The file is **parsed,
 never sourced**, and its list fields are validated (they word-split onto the `aws` command line):
