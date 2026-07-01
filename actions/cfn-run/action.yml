@@ -1,0 +1,86 @@
+name: cfn-run
+description: CloudFormation change-set plan/apply for one stack (self-contained; per-stack config).
+
+# The change set IS the plan: `plan` creates+describes it, `apply` executes the saved one.
+# Requires the AWS CLI on PATH (the reusable workflow defaults these jobs to an aws-cli image);
+# jq auto-installs if missing.
+inputs:
+  command:
+    description: "plan | apply | destroy-plan | destroy (apply executes whatever change set was saved)"
+    required: true
+  dir:
+    description: Stack directory (relative to repo root).
+    required: true
+  artifact_name:
+    description: Override change-set artifact name (default cfn-<dir-slug>).
+    default: ""
+  upload:
+    description: >-
+      (plan/destroy-plan only) Upload the saved change set for a later apply. Default "false"
+      (secure): the reusable workflow sets this "true" only on the default branch, never on PR
+      preview runs.
+    default: "false"
+  template_bucket:
+    description: >-
+      Optional S3 bucket. When set, `aws cloudformation package` runs first (uploads nested
+      templates / inline Lambda code and rewrites URLs). Leave empty for a plain template body.
+    default: ""
+
+outputs:
+  has_changes:
+    description: '"true" if the (plan|destroy-plan) produced changes to apply, else "false".'
+    value: ${{ steps.status.outputs.has_changes }}
+
+runs:
+  using: composite
+  steps:
+    - id: slug
+      shell: sh
+      env:
+        DIR_INPUT: ${{ inputs.dir }}
+        NAME_INPUT: ${{ inputs.artifact_name }}
+      run: |
+        name="${NAME_INPUT:-cfn-${DIR_INPUT}}"
+        printf 'name=%s\n' "$(printf '%s' "$name" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+    # apply: fetch the saved change set. No continue-on-error — a missing artifact must fail.
+    - if: inputs.command == 'apply'
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ steps.slug.outputs.name }}
+        path: ${{ inputs.dir }}
+
+    - shell: sh
+      env:
+        COMMAND: ${{ inputs.command }}
+        CFN_WORKSPACE_DIR: ${{ inputs.dir }}
+        # Base-branch controlled only — never sourced from the PR-editable cfn-ci.env.
+        TEMPLATE_BUCKET: ${{ inputs.template_bucket }}
+      run: sh "$GITHUB_ACTION_PATH/run.sh"
+
+    # Expose whether the change set has changes so a caller can skip apply (and its env gate).
+    - id: status
+      if: inputs.command == 'plan' || inputs.command == 'destroy-plan'
+      shell: sh
+      env:
+        DIR_INPUT: ${{ inputs.dir }}
+      run: |
+        if [ -f "${DIR_INPUT}/changeset.status" ] && [ "$(cat "${DIR_INPUT}/changeset.status")" = "changed" ]; then
+          printf 'has_changes=true\n' >> "$GITHUB_OUTPUT"
+        else
+          printf 'has_changes=false\n' >> "$GITHUB_OUTPUT"
+        fi
+
+    # plan/destroy-plan: persist the change-set name/type/status (when upload=true) so apply can
+    # execute the exact reviewed change set.
+    - if: (inputs.command == 'plan' || inputs.command == 'destroy-plan') && inputs.upload == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.slug.outputs.name }}
+        path: |
+          ${{ inputs.dir }}/changeset.name
+          ${{ inputs.dir }}/changeset.type
+          ${{ inputs.dir }}/changeset.status
+        if-no-files-found: warn
+        retention-days: 5
+        overwrite: true

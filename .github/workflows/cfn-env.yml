@@ -1,0 +1,224 @@
+# =============================================================================
+# iac-github :: per-environment CloudFormation flow (the building-block path).
+#
+#   secret_scan ─┐
+#   lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check        (ONE stack per call)
+#                │
+# The consumer calls this ONCE PER ENV, e.g.:
+#
+#   jobs:
+#     dev:  { uses: .../cfn-env.yml@v2, with: { dir: stacks/dev,  environment: dev  } }
+#     prod: { uses: .../cfn-env.yml@v2, with: { dir: stacks/prod, environment: prod } }
+#
+# The change set IS the plan: `plan` creates+describes it, `apply` executes the exact saved one
+# after the Environment gate (dev: no reviewer = auto; prod: reviewer = approval). apply only
+# runs when the change set has changes, so an unchanged prod never fires its gate. Identity
+# (role/region) + stack config are read from the stack's cfn-ci.env.
+#
+# Every job runs in a container by default (deploy jobs -> amazon/aws-cli; lint -> python).
+# Inner action refs are full-path @v2 (a reusable workflow's `./local` resolves against the
+# CALLER repo). release.yml moves the floating v2.
+# =============================================================================
+name: cfn-env
+
+on:
+  workflow_call:
+    inputs:
+      dir:
+        type: string
+        required: true                 # the stack directory, e.g. stacks/dev
+      environment:
+        type: string
+        required: true                 # GitHub Environment used for the apply gate
+      mode:
+        type: string
+        default: "deploy"              # deploy | destroy
+      secrets_provider:
+        type: string
+        default: ""                    # override each stack's file-level SECRETS_PROVIDER (github | awssm | none)
+      container_image:
+        type: string
+        default: ""                    # shared fallback image for every job (empty = the runner host)
+      # Per-job images ship with sensible DEFAULTS — override only when you need to. Set any to
+      # "" to run that job on the host. Each job runs in its OWN image.
+      secret_scan_image:
+        type: string
+        default: "zricethezav/gitleaks:v8.30.1"      # gitleaks baked in
+      lint_image:
+        type: string
+        default: "python:3.12-slim"                  # cfn-lint auto-installs via pip
+      resolve_image:
+        type: string
+        default: "amazon/aws-cli:2.35.13"            # aws + git; jq auto-installs (github provider)
+      plan_image:
+        type: string
+        default: "amazon/aws-cli:2.35.13"            # aws CLI; jq auto-installs
+      apply_image:
+        type: string
+        default: "amazon/aws-cli:2.35.13"            # aws CLI; jq auto-installs
+      default_region:
+        type: string
+        default: ""
+      runs_on:
+        type: string
+        default: "ubuntu-latest"
+      lint_path:
+        type: string
+        default: "."
+      template_bucket:
+        type: string
+        default: ""                    # optional: `aws cloudformation package` bucket (nested/Lambda)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfn-env-${{ github.ref }}-${{ inputs.dir }}-${{ inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  secret_scan:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.secret_scan_image || inputs.container_image }}   # empty = shared/host
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: Uaena1711/iac-github/actions/secret-scan@v2
+
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.lint_image || inputs.container_image }}   # empty = shared/host
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/cfn-lint@v2
+        with:
+          path: ${{ inputs.lint_path }}
+
+  # Resolve this stack's identity (role/region) from its cfn-ci.env.
+  resolve:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.resolve_image || inputs.container_image }}   # empty = shared/host
+    permissions: { contents: read }
+    outputs:
+      role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
+      region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
+    steps:
+      - uses: actions/checkout@v5
+      # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
+      # like awssm keeps these literal, github resolves them from vars/secrets.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: cfn-ci.env
+          provider: ${{ inputs.secrets_provider }}
+          only_keys: AWS_ROLE_ARN,AWS_REGION
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      - id: d
+        uses: Uaena1711/iac-github/actions/detect-changes@v2
+        with:
+          marker: cfn-ci.env
+          env_file: cfn-ci.env
+          only_dir: ${{ inputs.dir }}
+          default_region: ${{ inputs.default_region }}
+
+  plan:
+    needs: [secret_scan, lint, resolve]
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.plan_image || inputs.container_image }}   # empty = shared/host
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      has_changes: ${{ steps.r.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+        with:
+          role_arn: ${{ needs.resolve.outputs.role_arn }}
+          region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve the remaining cfn-ci.env placeholders (awssm can now reach the account).
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: cfn-ci.env
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      # Inject sensitive CloudFormation parameters from cfn-params.env as CFN_PARAM_* env —
+      # masked, never written to disk. These are captured into the change set at create time.
+      # No-op if the stack has no cfn-params.env.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: cfn-params.env
+          emit: github-env
+          export_prefix: CFN_PARAM_
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      - id: r
+        uses: Uaena1711/iac-github/actions/cfn-run@v2
+        with:
+          command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
+          dir: ${{ inputs.dir }}
+          template_bucket: ${{ inputs.template_bucket }}
+          # persist the change set for apply only when an apply can run (default branch)
+          upload: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+  # Runs ONLY when the change set has changes — so an unchanged env never fires its approval gate.
+  # BOTH deploy and destroy apply are default-branch-only (so a PR/feature branch can never execute
+  # or delete a stack); the Environment reviewer is the second gate. mode=destroy is a deliberate
+  # workflow_dispatch (write-access) action on the default branch.
+  apply:
+    needs: [resolve, plan]
+    if: >-
+      needs.plan.outputs.has_changes == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.apply_image || inputs.container_image }}   # empty = shared/host
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+        with:
+          role_arn: ${{ needs.resolve.outputs.role_arn }}
+          region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve cfn-ci.env placeholders the same way the plan job did.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: cfn-ci.env
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      # No cfn-params.env injection here: unlike Terraform, `execute-change-set` uses the
+      # parameters captured when the plan job created the change set — apply never re-reads them.
+      - uses: Uaena1711/iac-github/actions/cfn-run@v2
+        with:
+          command: ${{ inputs.mode == 'destroy' && 'destroy' || 'apply' }}
+          dir: ${{ inputs.dir }}
+
+  check:
+    needs: [secret_scan, lint, resolve, plan, apply]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - name: roll up results
+        run: |
+          echo "secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ] || { echo "lint failed"; exit 1; }
+          [ "${{ needs.resolve.result }}" = "success" ] || { echo "resolve failed"; exit 1; }
+          case "${{ needs.plan.result }}"  in success|skipped) ;; *) echo "plan failed";  exit 1 ;; esac
+          case "${{ needs.apply.result }}" in success|skipped) ;; *) echo "apply failed"; exit 1 ;; esac
+          echo "ok"

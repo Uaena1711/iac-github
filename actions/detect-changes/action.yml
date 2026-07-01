@@ -8,6 +8,9 @@ inputs:
   marker:
     description: Marker file that defines a workspace.
     default: "provider.tf"
+  env_file:
+    description: Per-workspace identity file to read role_arn/region from (parsed, not sourced).
+    default: "tf-ci.env"
   force_all:
     description: '"true" to select every workspace regardless of diff.'
     default: "false"
@@ -39,6 +42,7 @@ runs:
       env:
         WORKSPACES_ROOT: ${{ inputs.workspaces_root }}
         WORKSPACE_MARKER: ${{ inputs.marker }}
+        ENV_FILE: ${{ inputs.env_file }}
         FORCE_ALL: ${{ inputs.force_all }}
         SHARED_PATHS: ${{ inputs.shared_paths }}
         DEFAULT_REGION: ${{ inputs.default_region }}

@@ -3,6 +3,23 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.2.0
+
+- Add a **CloudFormation pipeline** alongside the Terraform one. `cfn-env.yml` is a
+  per-environment reusable workflow with the same 6-job graph as `tf-env.yml`
+  (secret_scan → lint → resolve → plan → apply → check), where the **change set is the plan**:
+  `plan` creates+describes a change set, `apply` executes the exact saved one after the
+  Environment gate. New building blocks: [`cfn-run`](actions/cfn-run) (change-set
+  create/execute/delete engine — CREATE-vs-UPDATE, empty-change-set no-op, optional
+  `aws cloudformation package`, `destroy` = delete-stack) and [`cfn-lint`](actions/cfn-lint)
+  (pinned cfn-lint, static, no credentials). Deploy jobs default to `amazon/aws-cli`, the lint
+  job to `python` (cfn-lint auto-installs). Single-stack scope; StackSets not included.
+- Identity + stack config live per-stack in `cfn-ci.env` (mirrors `tf-ci.env`); sensitive
+  `NoEcho` parameters come from an optional `cfn-params.env` as `Name=${REF}`, resolved +
+  masked + merged in memory, never written to disk (mirrors `tf-vars.env`).
+- `detect-changes` gains `env_file` input (default `tf-ci.env`) so the one action serves both
+  `provider.tf`/`tf-ci.env` and `cfn-ci.env` stacks. Backward-compatible.
+
 ## 2.1.0
 
 - Optional **container execution**. `tf-env.yml` takes a shared `container_image` plus
