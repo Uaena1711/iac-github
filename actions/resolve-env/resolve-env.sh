@@ -77,9 +77,18 @@ else
   # shellcheck disable=SC1090
   . "$plugin"
   command -v provider_resolve >/dev/null 2>&1 || die "provider '${provider}' does not define provider_resolve()"
-  ensure_jq   # shipped providers parse JSON with jq; install it if the image lacks it
-  if command -v provider_check >/dev/null 2>&1; then provider_check || die "provider '${provider}' preflight failed"; fi
 fi
+
+# Provider tools (jq, and the provider's own preflight) are only needed if the file actually
+# has a placeholder to resolve. A stack that keeps these keys literal (e.g. awssm identity
+# fields in the pre-OIDC resolve job) needs nothing — so a terraform image without aws is fine.
+_provider_ready=0
+provider_init() {
+  [ "$_provider_ready" = "1" ] && return 0
+  ensure_jq
+  if command -v provider_check >/dev/null 2>&1; then provider_check || die "provider '${provider}' preflight failed"; fi
+  _provider_ready=1
+}
 
 # optional key allowlist (file mode: pre-OIDC resolve job passes AWS_ROLE_ARN,AWS_REGION).
 ONLY="$(printf '%s' "${ONLY_KEYS:-}" | tr ',' ' ')"
@@ -92,6 +101,7 @@ in_scope() {
 # echo the resolved value for a ${ref} value.
 resolve_ref() {   # $1=key $2=value(${ref})
   [ "$provider" != "none" ] || die "value for ${1} is a \${ref} placeholder but no provider is set"
+  provider_init   # lazy: only demand jq/aws once we actually need to resolve something
   # shellcheck disable=SC2016  # strip the literal ${ and } delimiters
   _ref="${2#'${'}"; _ref="${_ref%'}'}"
   [ -n "$_ref" ] || die "empty placeholder for ${1}"
