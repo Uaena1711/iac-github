@@ -18,6 +18,12 @@ This file lists changes to the iac-github Actions catalog. Versioning follows Se
   (job-local, never an artifact). Providers are plugins (`providers/<name>.sh`); `github`
   (vars/secrets) and `awssm` (Secrets Manager) ship in the box. Backward-compatible:
   literal `tf-ci.env` files (no `SECRETS_PROVIDER`) are untouched.
+- `resolve-env` also supports `emit: github-env`: it resolves an optional per-stack
+  `tf-vars.env` and exports each entry as `TF_VAR_<name>` to `$GITHUB_ENV` (masked,
+  multiline-safe), so **sensitive Terraform input variables** are injected as environment
+  variables — never written to disk — and Terraform reads them natively. Mark such
+  variables `sensitive = true` to redact them from plan output. Wired into `plan`/`apply`;
+  a no-op when the stack has no `tf-vars.env`.
 - Building blocks: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `tf-run`, `resolve-env`.
 
 ## 1.2.0

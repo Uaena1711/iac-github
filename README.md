@@ -105,6 +105,33 @@ place (job-local — resolved secrets are never uploaded as artifacts). Shipped 
 Add your own by dropping one `actions/resolve-env/providers/<name>.sh` — see that dir's
 `README.md`. Legacy literal `tf-ci.env` files (no `SECRETS_PROVIDER`) keep working unchanged.
 
+### Passing Terraform input variables (normal & sensitive)
+
+Non-sensitive variables are just committed HCL — a literal in `main.tf`, a `*.auto.tfvars`,
+or the `var_file` input. For **sensitive** variables, don't put them on disk: add an
+optional `tf-vars.env` to the stack and the pipeline injects each entry as `TF_VAR_<name>`
+(masked, never written to a file), which Terraform reads natively.
+
+```sh
+# envs/dev/tf-vars.env — picks a provider like tf-ci.env; ${REF} is pulled from the vault.
+SECRETS_PROVIDER=github
+db_password=${DB_PASSWORD_DEV}        # -> TF_VAR_db_password (from a GitHub secret)
+```
+
+Declare the variable `sensitive = true` so Terraform redacts it from plan/apply output:
+
+```hcl
+variable "db_password" {
+  type      = string
+  sensitive = true
+}
+```
+
+Caveat (inherent to Terraform): a sensitive value still ends up **inside the saved plan
+and the state**. That's why the plan artifact is uploaded only on the default branch with
+short retention, and state must be an encrypted backend (SSE-KMS). `sensitive = true` keeps
+it out of the **logs**, not out of state.
+
 ### One-time AWS trust policy (per role, set up outside this catalog)
 
 > ⚠️ **Security — read this.** The `plan` job runs on **pull requests** with

@@ -135,6 +135,18 @@ jobs:
           region: ${{ needs.resolve.outputs.region }}
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
+      # Inject Terraform input variables (incl. sensitive ones) from tf-vars.env as TF_VAR_*
+      # env — masked, never written to disk. No-op if the stack has no tf-vars.env.
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: tf-vars.env
+          emit: github-env
+          export_prefix: TF_VAR_
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
       - id: r
         uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
         with:
@@ -170,6 +182,17 @@ jobs:
       - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
         with:
           dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      # Same TF_VAR_* injection as plan, so apply re-evaluates with the sensitive inputs.
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: tf-vars.env
+          emit: github-env
+          export_prefix: TF_VAR_
           provider: ${{ inputs.secrets_provider }}
           region: ${{ needs.resolve.outputs.region }}
           gh_vars_json: ${{ toJSON(vars) }}
