@@ -9,7 +9,7 @@
 # Consumer:
 #   jobs:
 #     docs:
-#       uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@v1
+#       uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@v2
 #       permissions: { contents: write }
 # =============================================================================
 name: tf-docs
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0         # full history so the push-back is a fast-forward
-      - uses: Uaena1711/iac-github/actions/tf-docs@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/tf-docs@v2
         with:
           working_dir: ${{ inputs.working_dir }}
           version: ${{ inputs.version }}

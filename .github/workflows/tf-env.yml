@@ -7,16 +7,16 @@
 # The consumer calls this ONCE PER ENV and decides per env whether it's gated, e.g.:
 #
 #   jobs:
-#     dev:  { uses: .../tf-env.yml@v1, with: { dir: envs/dev,  environment: dev  } }
-#     prod: { uses: .../tf-env.yml@v1, with: { dir: envs/prod, environment: prod } }
+#     dev:  { uses: .../tf-env.yml@v2, with: { dir: envs/dev,  environment: dev  } }
+#     prod: { uses: .../tf-env.yml@v2, with: { dir: envs/prod, environment: prod } }
 #
 # Each call is its OWN job graph, so a prod awaiting approval never blocks dev. The gate is
 # simply whether the `environment` has required reviewers (dev: none = auto; prod: reviewer =
 # approval). apply only runs when the plan actually has changes, so an unchanged prod never
 # fires its gate. Identity (role/region) is read from the workspace's tf-ci.env.
 #
-# Inner action refs are full-path @v1 (a reusable workflow's `./local` resolves against the
-# CALLER repo). release.yml moves the floating v1.
+# Inner action refs are full-path @v2 (a reusable workflow's `./local` resolves against the
+# CALLER repo). release.yml moves the floating v2.
 # =============================================================================
 name: tf-env
 
@@ -77,14 +77,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - uses: Uaena1711/iac-github/actions/secret-scan@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/secret-scan@v2
 
   lint:
     runs-on: ${{ inputs.runs_on }}
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/tf-lint@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/tf-lint@v2
         with:
           path: ${{ inputs.lint_path }}
           tf_version: ${{ inputs.tf_version }}
@@ -100,7 +100,7 @@ jobs:
       - uses: actions/checkout@v5
       # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
       # like awssm keeps these literal, github resolves them from vars/secrets.
-      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -108,7 +108,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       - id: d
-        uses: Uaena1711/iac-github/actions/detect-changes@feat/per-env-path-b
+        uses: Uaena1711/iac-github/actions/detect-changes@v2
         with:
           only_dir: ${{ inputs.dir }}
           default_region: ${{ inputs.default_region }}
@@ -123,12 +123,12 @@ jobs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
       # Post-OIDC: resolve the remaining backend secrets (awssm can now reach the account).
-      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -137,7 +137,7 @@ jobs:
           gh_secrets_json: ${{ toJSON(secrets) }}
       # Inject Terraform input variables (incl. sensitive ones) from tf-vars.env as TF_VAR_*
       # env — masked, never written to disk. No-op if the stack has no tf-vars.env.
-      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
           env_file: tf-vars.env
@@ -148,7 +148,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       - id: r
-        uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
+        uses: Uaena1711/iac-github/actions/tf-run@v2
         with:
           command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
           dir: ${{ inputs.dir }}
@@ -174,12 +174,12 @@ jobs:
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
       # Post-OIDC: resolve backend secrets the same way the plan job did.
-      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -187,7 +187,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       # Same TF_VAR_* injection as plan, so apply re-evaluates with the sensitive inputs.
-      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
           env_file: tf-vars.env
@@ -197,7 +197,7 @@ jobs:
           region: ${{ needs.resolve.outputs.region }}
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
-      - uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
+      - uses: Uaena1711/iac-github/actions/tf-run@v2
         with:
           command: apply
           dir: ${{ inputs.dir }}
