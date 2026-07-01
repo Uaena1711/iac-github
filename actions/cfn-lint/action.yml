@@ -1,0 +1,45 @@
+name: cfn-lint
+description: Lint CloudFormation templates with cfn-lint (pinned; static, no AWS credentials).
+
+# Building block (Tier 1). Cheap, no cloud access. The calling job just needs a checkout.
+# cfn-lint is a Python tool, so it is pinned by version and pip-installed if the image lacks it
+# (the reusable workflow defaults this job to a python image; an image that already ships
+# cfn-lint short-circuits the install).
+inputs:
+  path:
+    description: Directory scanned for CloudFormation templates (default repo root).
+    default: "."
+  cfn_lint_version:
+    description: cfn-lint version to install when it is not already on PATH.
+    default: "1.52.1"
+  templates:
+    description: Optional explicit space-separated template list (skips auto-discovery).
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Reuse a cfn-lint baked into the job's container image; else install the pin via pip.
+    - name: ensure cfn-lint
+      shell: sh
+      env:
+        V: ${{ inputs.cfn_lint_version }}
+      run: |
+        set -eu
+        if command -v cfn-lint >/dev/null 2>&1; then
+          cfn-lint --version
+        else
+          echo "[info] cfn-lint not found — installing pinned cfn-lint ${V}"
+          if command -v pip >/dev/null 2>&1; then PIP=pip
+          elif command -v pip3 >/dev/null 2>&1; then PIP=pip3
+          else echo "[error] no pip on PATH — use a python image or an image with cfn-lint" >&2; exit 1
+          fi
+          "$PIP" install --quiet --disable-pip-version-check "cfn-lint==${V}"
+          cfn-lint --version
+        fi
+    - name: cfn-lint
+      shell: sh
+      env:
+        LINT_PATH: ${{ inputs.path }}
+        TEMPLATES: ${{ inputs.templates }}
+      run: sh "$GITHUB_ACTION_PATH/cfn-lint.sh"

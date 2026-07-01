@@ -3,9 +3,9 @@
 #
 # A "workspace" is any directory containing the marker file (default provider.tf)
 # under WORKSPACES_ROOT. Maps every changed file to its nearest ancestor workspace,
-# then for each workspace reads its tf-ci.env (PARSED, not sourced) to build a matrix
-# entry {dir, role_arn, region, environment}. Emits JSON to $GITHUB_OUTPUT (matrix=)
-# plus has_changes=true|false.
+# then for each workspace reads its identity file ENV_FILE (default tf-ci.env; PARSED,
+# not sourced) to build a matrix entry {dir, role_arn, region, environment}. Emits JSON
+# to $GITHUB_OUTPUT (matrix=) plus has_changes=true|false.
 #
 # Selects ALL workspaces when: FORCE_ALL=true, no usable base SHA (first run), or a
 # change touches a shared path (SHARED_PATHS). Empty result => downstream job skips.
@@ -13,6 +13,7 @@
 # Env (set by the composite action):
 #   WORKSPACES_ROOT   dir to scan (default "envs")
 #   WORKSPACE_MARKER  marker file defining a workspace (default provider.tf)
+#   ENV_FILE          per-workspace identity file to read (default tf-ci.env)
 #   FORCE_ALL         "true" => all workspaces regardless of diff
 #   SHARED_PATHS      space/comma list; a change under any selects ALL
 #   DEFAULT_REGION    fallback region when tf-ci.env omits AWS_REGION
@@ -25,6 +26,7 @@ log() { printf '%s\n' "$*" >&2; }
 
 ROOT="${WORKSPACES_ROOT:-envs}"; ROOT="${ROOT%/}"
 MARKER="${WORKSPACE_MARKER:-provider.tf}"
+ENV_FILE="${ENV_FILE:-tf-ci.env}"
 DEFAULT_REGION="${DEFAULT_REGION:-}"
 FORCE_ALL="${FORCE_ALL:-false}"
 ONLY_DIR="${ONLY_DIR:-}"; ONLY_DIR="${ONLY_DIR%/}"
@@ -107,9 +109,9 @@ for d in $dirs; do
 done
 dirs="$(printf '%s' "$safe" | sed '/^$/d')"
 
-# value of KEY from a workspace's tf-ci.env (parsed, NOT sourced).
+# value of KEY from a workspace's identity file ENV_FILE (parsed, NOT sourced).
 read_env() {
-  f="$1/tf-ci.env"
+  f="$1/${ENV_FILE}"
   [ -f "$f" ] || return 0
   grep -E "^${2}=" "$f" 2>/dev/null | head -1 | cut -d= -f2-
 }
