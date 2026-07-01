@@ -1,0 +1,222 @@
+# =============================================================================
+# iac-github :: per-environment Terraform flow (the building-block path).
+#
+#   secret_scan ─┐
+#   lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check        (ONE workspace per call)
+#                │
+# The consumer calls this ONCE PER ENV and decides per env whether it's gated, e.g.:
+#
+#   jobs:
+#     dev:  { uses: .../tf-env.yml@v2, with: { dir: envs/dev,  environment: dev  } }
+#     prod: { uses: .../tf-env.yml@v2, with: { dir: envs/prod, environment: prod } }
+#
+# Each call is its OWN job graph, so a prod awaiting approval never blocks dev. The gate is
+# simply whether the `environment` has required reviewers (dev: none = auto; prod: reviewer =
+# approval). apply only runs when the plan actually has changes, so an unchanged prod never
+# fires its gate. Identity (role/region) is read from the workspace's tf-ci.env.
+#
+# Inner action refs are full-path @v2 (a reusable workflow's `./local` resolves against the
+# CALLER repo). release.yml moves the floating v2.
+# =============================================================================
+name: tf-env
+
+on:
+  workflow_call:
+    inputs:
+      dir:
+        type: string
+        required: true                 # the env workspace, e.g. envs/dev
+      environment:
+        type: string
+        required: true                 # GitHub Environment used for the apply gate
+      mode:
+        type: string
+        default: "deploy"              # deploy | destroy
+      secrets_provider:
+        type: string
+        default: ""                    # override each env's file-level SECRETS_PROVIDER (github | awssm | none)
+      tf_version:
+        type: string
+        default: "1.15.7"
+      default_region:
+        type: string
+        default: ""
+      runs_on:
+        type: string
+        default: "ubuntu-latest"
+      lint_path:
+        type: string
+        default: "."
+      var_file:
+        type: string
+        default: ""
+      tf_init_options:
+        type: string
+        default: ""
+      tf_plan_options:
+        type: string
+        default: ""
+      tf_apply_options:
+        type: string
+        default: ""
+      tf_destroy_options:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tf-env-${{ github.ref }}-${{ inputs.dir }}-${{ inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  secret_scan:
+    runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: Uaena1711/iac-github/actions/secret-scan@v2
+
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/tf-lint@v2
+        with:
+          path: ${{ inputs.lint_path }}
+          tf_version: ${{ inputs.tf_version }}
+
+  # Resolve this env's identity (role/region) from its tf-ci.env.
+  resolve:
+    runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read }
+    outputs:
+      role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
+      region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
+    steps:
+      - uses: actions/checkout@v5
+      # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
+      # like awssm keeps these literal, github resolves them from vars/secrets.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          only_keys: AWS_ROLE_ARN,AWS_REGION
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      - id: d
+        uses: Uaena1711/iac-github/actions/detect-changes@v2
+        with:
+          only_dir: ${{ inputs.dir }}
+          default_region: ${{ inputs.default_region }}
+
+  plan:
+    needs: [secret_scan, lint, resolve]
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      has_changes: ${{ steps.r.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+        with:
+          role_arn: ${{ needs.resolve.outputs.role_arn }}
+          region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve the remaining backend secrets (awssm can now reach the account).
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      # Inject Terraform input variables (incl. sensitive ones) from tf-vars.env as TF_VAR_*
+      # env — masked, never written to disk. No-op if the stack has no tf-vars.env.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: tf-vars.env
+          emit: github-env
+          export_prefix: TF_VAR_
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      - id: r
+        uses: Uaena1711/iac-github/actions/tf-run@v2
+        with:
+          command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
+          dir: ${{ inputs.dir }}
+          tf_version: ${{ inputs.tf_version }}
+          var_file: ${{ inputs.var_file }}
+          tf_init_options: ${{ inputs.tf_init_options }}
+          tf_plan_options: ${{ inputs.tf_plan_options }}
+          tf_destroy_options: ${{ inputs.tf_destroy_options }}
+          # persist the plan for apply only when an apply can run (destroy, or default branch)
+          upload: ${{ inputs.mode == 'destroy' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+  # Runs ONLY when the plan has changes — so an unchanged env never fires its approval gate.
+  apply:
+    needs: [resolve, plan]
+    if: >-
+      needs.plan.outputs.has_changes == 'true' &&
+      ( inputs.mode == 'destroy' ||
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch) )
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+        with:
+          role_arn: ${{ needs.resolve.outputs.role_arn }}
+          region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve backend secrets the same way the plan job did.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      # Same TF_VAR_* injection as plan, so apply re-evaluates with the sensitive inputs.
+      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+        with:
+          dir: ${{ inputs.dir }}
+          env_file: tf-vars.env
+          emit: github-env
+          export_prefix: TF_VAR_
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
+      - uses: Uaena1711/iac-github/actions/tf-run@v2
+        with:
+          command: apply
+          dir: ${{ inputs.dir }}
+          tf_version: ${{ inputs.tf_version }}
+          tf_init_options: ${{ inputs.tf_init_options }}
+          tf_apply_options: ${{ inputs.tf_apply_options }}
+
+  check:
+    needs: [secret_scan, lint, resolve, plan, apply]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - name: roll up results
+        run: |
+          echo "secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ] || { echo "lint failed"; exit 1; }
+          [ "${{ needs.resolve.result }}" = "success" ] || { echo "resolve failed"; exit 1; }
+          case "${{ needs.plan.result }}"  in success|skipped) ;; *) echo "plan failed";  exit 1 ;; esac
+          case "${{ needs.apply.result }}" in success|skipped) ;; *) echo "apply failed"; exit 1 ;; esac
+          echo "ok"

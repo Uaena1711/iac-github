@@ -1,0 +1,43 @@
+name: tf-docs
+description: Generate Terraform module docs with terraform-docs (pinned + checksum), injected into each README.md.
+
+# Building block (Tier 1). Static parse — no terraform init, no cloud access. The calling
+# job just needs a checkout. Mirrors the reference catalog's `.terraform_docs` documentation
+# job: `terraform-docs markdown table` injected into README.md, per module dir.
+inputs:
+  working_dir:
+    description: Root to scan for Terraform dirs (each dir with *.tf gets its README injected).
+    default: "."
+  readme_name:
+    description: README file to inject into (created if missing).
+    default: "README.md"
+  version:
+    description: terraform-docs version.
+    default: "0.24.0"
+  sha256:
+    description: SHA256 of terraform-docs-v<version>-linux-amd64.tar.gz (integrity pin).
+    default: "9005daf969de0b50134493a2c00078b49f5f5b39d021cda7c89bf4d4f3d776d3"
+
+runs:
+  using: composite
+  steps:
+    - name: install terraform-docs
+      shell: bash
+      env:
+        V: ${{ inputs.version }}
+        SHA: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        curl -fsSL -o tfdocs.tgz \
+          "https://github.com/terraform-docs/terraform-docs/releases/download/v${V}/terraform-docs-v${V}-linux-amd64.tar.gz"
+        echo "${SHA}  tfdocs.tgz" | sha256sum -c -
+        mkdir -p "${RUNNER_TEMP}/tfdocs-bin"
+        tar -xzf tfdocs.tgz -C "${RUNNER_TEMP}/tfdocs-bin" terraform-docs
+        chmod +x "${RUNNER_TEMP}/tfdocs-bin/terraform-docs"
+        echo "${RUNNER_TEMP}/tfdocs-bin" >> "$GITHUB_PATH"
+    - name: generate
+      shell: sh
+      env:
+        WORKING_DIR: ${{ inputs.working_dir }}
+        README_NAME: ${{ inputs.readme_name }}
+      run: sh "$GITHUB_ACTION_PATH/tf-docs.sh"

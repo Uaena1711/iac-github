@@ -3,6 +3,33 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.0.0
+
+- **BREAKING:** replaced the matrix paved-road (`terraform.yml`) with a **per-environment
+  reusable workflow** `tf-env.yml`. The consumer calls it once per env and decides gating
+  per env (e.g. `dev` auto, `prod` approval). Each call is its own job graph, so a `prod`
+  awaiting approval never blocks `dev`. Migrate callers from one `terraform.yml` job to one
+  `tf-env.yml` job per env (see the example repo).
+- apply runs only when the plan has changes, so an unchanged env never fires its approval
+  gate (`tf-run` now exposes a `has_changes` output).
+- Add a `resolve-env` building block: an env's `tf-ci.env` picks a secret provider at the
+  file level (`SECRETS_PROVIDER=`, overridable by the `secrets_provider` input) and uses
+  `${REF}` placeholders that are pulled from a vault, masked, and written back in place
+  (job-local, never an artifact). Providers are plugins (`providers/<name>.sh`); `github`
+  (vars/secrets) and `awssm` (Secrets Manager) ship in the box. Backward-compatible:
+  literal `tf-ci.env` files (no `SECRETS_PROVIDER`) are untouched.
+- `resolve-env` also supports `emit: github-env`: it resolves an optional per-stack
+  `tf-vars.env` and exports each entry as `TF_VAR_<name>` to `$GITHUB_ENV` (masked,
+  multiline-safe), so **sensitive Terraform input variables** are injected as environment
+  variables — never written to disk — and Terraform reads them natively. Mark such
+  variables `sensitive = true` to redact them from plan output. Wired into `plan`/`apply`;
+  a no-op when the stack has no `tf-vars.env`.
+- Add a `tf-docs` building block + a `tf-docs.yml` reusable workflow: on a push, regenerate
+  each module's README with terraform-docs (pinned + checksum, inject mode) and commit the
+  result back to the branch. The doc commit carries a `[skip ci]` token (and is made with
+  `GITHUB_TOKEN`), so it never re-triggers a pipeline. No-op when docs are already current.
+- Building blocks: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `resolve-env`, `tf-run`, `tf-docs`.
+
 ## 1.2.0
 
 - Add a `tf-lint` building block (`terraform fmt -check` + tflint, pinned + checksum) and

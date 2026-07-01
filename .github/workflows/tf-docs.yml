@@ -1,0 +1,65 @@
+# =============================================================================
+# iac-github :: terraform-docs on merge (mirrors the reference catalog's `.terraform_docs`).
+#
+# On the caller's push to a branch, regenerate each module's README (terraform-docs, inject
+# mode) and commit the result BACK to the same branch. The commit message carries a
+# `[skip ci]` token so the doc commit never re-triggers a pipeline (belt-and-suspenders:
+# pushes made with GITHUB_TOKEN don't trigger workflows either). No-op when docs are current.
+#
+# Consumer:
+#   jobs:
+#     docs:
+#       uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@v2
+#       permissions: { contents: write }
+# =============================================================================
+name: tf-docs
+
+on:
+  workflow_call:
+    inputs:
+      working_dir:
+        type: string
+        default: "."
+      commit_message:
+        type: string
+        default: "docs: regenerate terraform-docs [skip ci]"
+      version:
+        type: string
+        default: "0.24.0"
+      runs_on:
+        type: string
+        default: "ubuntu-latest"
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: write            # commit the regenerated READMEs back to the branch
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0         # full history so the push-back is a fast-forward
+      - uses: Uaena1711/iac-github/actions/tf-docs@v2
+        with:
+          working_dir: ${{ inputs.working_dir }}
+          version: ${{ inputs.version }}
+      - name: commit & push regenerated docs
+        shell: bash
+        env:
+          MSG: ${{ inputs.commit_message }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "terraform-docs already up to date — nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "$MSG"
+          # push back to the branch that triggered this run
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "pushed regenerated docs to ${GITHUB_REF_NAME}"
