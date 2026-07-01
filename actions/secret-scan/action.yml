@@ -13,19 +13,20 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    - shell: sh
       env:
         V: ${{ inputs.gitleaks_version }}
         SHA: ${{ inputs.gitleaks_sha256 }}
       run: |
-        set -euo pipefail
+        set -eu
+        # portable download (host has curl; a minimal Alpine image has busybox wget)
+        dl() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$1" "$2"; else wget -qO "$1" "$2"; fi; }
         # Reuse a gitleaks baked into the job's container image; otherwise install the pin.
         if command -v gitleaks >/dev/null 2>&1; then
           echo "[secret-scan] using preinstalled gitleaks: $(gitleaks version 2>/dev/null || echo '?')"
           GITLEAKS=gitleaks
         else
-          curl -fsSL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
+          dl gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
           echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
           tar -xzf gitleaks.tar.gz gitleaks
           GITLEAKS="$PWD/gitleaks"

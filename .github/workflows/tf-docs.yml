@@ -9,7 +9,7 @@
 # Consumer:
 #   jobs:
 #     docs:
-#       uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@v2
+#       uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@feat/container-image
 #       permissions: { contents: write }
 # =============================================================================
 name: tf-docs
@@ -46,16 +46,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0         # full history so the push-back is a fast-forward
-      - uses: Uaena1711/iac-github/actions/tf-docs@v2
+      - uses: Uaena1711/iac-github/actions/tf-docs@feat/container-image
         with:
           working_dir: ${{ inputs.working_dir }}
           version: ${{ inputs.version }}
       - name: commit & push regenerated docs
-        shell: bash
+        shell: sh
         env:
           MSG: ${{ inputs.commit_message }}
         run: |
-          set -euo pipefail
+          set -eu
           if [ -z "$(git status --porcelain)" ]; then
             echo "terraform-docs already up to date — nothing to commit"
             exit 0

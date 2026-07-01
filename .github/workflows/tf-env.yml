@@ -37,7 +37,24 @@ on:
         default: ""                    # override each env's file-level SECRETS_PROVIDER (github | awssm | none)
       container_image:
         type: string
-        default: ""                    # run jobs in this image (GLIBC/Debian-based; empty = on the runner host)
+        default: ""                    # shared fallback image for every job (empty = the runner host)
+      # Per-job image overrides (empty = fall back to container_image). Point each job at a
+      # small purpose-built image — like GitLab per-job `image:` — instead of one huge image.
+      secret_scan_image:
+        type: string
+        default: ""                    # needs: gitleaks (or git+curl/wget to install it)
+      lint_image:
+        type: string
+        default: ""                    # needs: terraform + tflint
+      resolve_image:
+        type: string
+        default: ""                    # needs: git; jq for the github/awssm providers, aws for awssm
+      plan_image:
+        type: string
+        default: ""                    # needs: terraform + git; jq/aws if the stack resolves secrets
+      apply_image:
+        type: string
+        default: ""                    # needs: terraform + git; jq/aws if the stack resolves secrets
       tf_version:
         type: string
         default: "1.15.7"
@@ -76,20 +93,20 @@ concurrency:
 jobs:
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.container_image }}   # empty = host
+    container: ${{ inputs.secret_scan_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - uses: Uaena1711/iac-github/actions/secret-scan@v2
+      - uses: Uaena1711/iac-github/actions/secret-scan@feat/container-image
 
   lint:
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.container_image }}   # empty = host
+    container: ${{ inputs.lint_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/tf-lint@v2
+      - uses: Uaena1711/iac-github/actions/tf-lint@feat/container-image
         with:
           path: ${{ inputs.lint_path }}
           tf_version: ${{ inputs.tf_version }}
@@ -97,7 +114,7 @@ jobs:
   # Resolve this env's identity (role/region) from its tf-ci.env.
   resolve:
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.container_image }}   # empty = host
+    container: ${{ inputs.resolve_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     outputs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
@@ -106,7 +123,7 @@ jobs:
       - uses: actions/checkout@v5
       # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
       # like awssm keeps these literal, github resolves them from vars/secrets.
-      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/container-image
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -114,7 +131,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       - id: d
-        uses: Uaena1711/iac-github/actions/detect-changes@v2
+        uses: Uaena1711/iac-github/actions/detect-changes@feat/container-image
         with:
           only_dir: ${{ inputs.dir }}
           default_region: ${{ inputs.default_region }}
@@ -122,7 +139,7 @@ jobs:
   plan:
     needs: [secret_scan, lint, resolve]
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.container_image }}   # empty = host
+    container: ${{ inputs.plan_image || inputs.container_image }}   # empty = shared/host
     permissions:
       id-token: write
       contents: read
@@ -130,12 +147,12 @@ jobs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/container-image
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
       # Post-OIDC: resolve the remaining backend secrets (awssm can now reach the account).
-      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/container-image
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -144,7 +161,7 @@ jobs:
           gh_secrets_json: ${{ toJSON(secrets) }}
       # Inject Terraform input variables (incl. sensitive ones) from tf-vars.env as TF_VAR_*
       # env — masked, never written to disk. No-op if the stack has no tf-vars.env.
-      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/container-image
         with:
           dir: ${{ inputs.dir }}
           env_file: tf-vars.env
@@ -155,7 +172,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       - id: r
-        uses: Uaena1711/iac-github/actions/tf-run@v2
+        uses: Uaena1711/iac-github/actions/tf-run@feat/container-image
         with:
           command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
           dir: ${{ inputs.dir }}
@@ -175,19 +192,19 @@ jobs:
       ( inputs.mode == 'destroy' ||
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch) )
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.container_image }}   # empty = host
+    container: ${{ inputs.apply_image || inputs.container_image }}   # empty = shared/host
     permissions:
       id-token: write
       contents: read
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/aws-oidc@v2
+      - uses: Uaena1711/iac-github/actions/aws-oidc@feat/container-image
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
       # Post-OIDC: resolve backend secrets the same way the plan job did.
-      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/container-image
         with:
           dir: ${{ inputs.dir }}
           provider: ${{ inputs.secrets_provider }}
@@ -195,7 +212,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       # Same TF_VAR_* injection as plan, so apply re-evaluates with the sensitive inputs.
-      - uses: Uaena1711/iac-github/actions/resolve-env@v2
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/container-image
         with:
           dir: ${{ inputs.dir }}
           env_file: tf-vars.env
@@ -205,7 +222,7 @@ jobs:
           region: ${{ needs.resolve.outputs.region }}
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
-      - uses: Uaena1711/iac-github/actions/tf-run@v2
+      - uses: Uaena1711/iac-github/actions/tf-run@feat/container-image
         with:
           command: apply
           dir: ${{ inputs.dir }}
