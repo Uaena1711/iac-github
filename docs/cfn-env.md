@@ -5,9 +5,10 @@ environment**, with per-stack keyless OIDC and GitHub-Environment approval gatin
 per env.
 
 ```
-secret_scan ─┐
+checkout ────┐  (uploads the source as an artifact)
+secret_scan ─┤
 lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check     (one stack per call)
-             ┘
+             ┘   (download-artifact + run in an aws image)
 ```
 
 - secret-scan (gitleaks) + lint (cfn-lint, static — no credentials) gate before any cloud access.
@@ -66,26 +67,31 @@ ones you want gated. To deploy just one env, keep only that env's job.
 | `container_image` | `""` | Shared fallback image (used when a per-job image is empty). See [Running in a container](#running-in-a-container). |
 | `secret_scan_image` | `zricethezav/gitleaks:v8.30.1` | secret-scan job's image. |
 | `lint_image` | `python:3.12-slim` | lint job's image (cfn-lint auto-installs via pip). |
-| `resolve_image` / `plan_image` / `apply_image` | `""` (host) | those jobs run on the runner host by default (AWS CLI + jq + git preinstalled). Point at an AWS-capable image (with git or tar for checkout) to containerize. |
+| `checkout_image` | `""` (host) | the checkout job's image. Host has git; point at a git image (e.g. `alpine/git`) for a pure-Docker self-hosted runner. |
+| `resolve_image` / `plan_image` / `apply_image` | `amazon/aws-cli:2.35.13` | the deploy jobs' image (pinned aws CLI). They fetch source via `download-artifact`, so the image needs no git/tar. Set `""` to run on the host instead. |
 | `default_region` | `""` | Fallback AWS region when a stack's `cfn-ci.env` omits `AWS_REGION`. |
 | `runs_on` | `ubuntu-latest` | Runner label. |
 | `lint_path` | `.` | Directory scanned for templates to cfn-lint. |
 | `template_bucket` | `""` | Optional S3 bucket → `aws cloudformation package` runs first (nested templates / inline Lambda / templates over the inline size limit). |
 
-## Where each job runs
+## Where each job runs (and self-hosted runners)
 
-- **The deploy jobs (`resolve`/`plan`/`apply`) run on the runner host by default** — GitHub-hosted
-  runners already ship the AWS CLI, `jq`, and `git`, so there's nothing to containerize (unlike the
-  Terraform pipeline, which uses a container to avoid reinstalling terraform).
-- **`secret_scan` and `lint` run in purpose-built images** by default (gitleaks; a `python` image
-  for cfn-lint) so their tool is reused, not reinstalled.
-- **To containerize the deploy jobs**, set `resolve_image`/`plan_image`/`apply_image` to an
-  AWS-capable image. It must also contain **`git` or `tar`** (for `actions/checkout`) — minimal
-  images like `amazon/aws-cli` have neither and will fail checkout; an Alpine-based image with the
-  AWS CLI + busybox works (GitHub mounts its own Node, so glibc and musl are both fine).
-- Tools **install only if missing** (via `curl`/`wget`, or `pip` for cfn-lint); `cfn-run`
-  auto-installs a pinned `jq`. Consumers of a reusable workflow can't set `container:` on the
-  calling job — these image **inputs** are the override surface.
+- **The deploy jobs (`resolve`/`plan`/`apply`) run in the pinned `amazon/aws-cli` container by
+  default.** They get the source from a **single `checkout` job** via `actions/download-artifact`
+  (a Node action — no `git`/`tar` needed), which is exactly why the minimal official aws-cli image
+  works even though `actions/checkout` would fail inside it.
+- **This is the self-hosted story:** a self-hosted runner only needs **Docker** — the AWS CLI comes
+  from the pinned image, not from tools you install and maintain on the host. Set `checkout_image`
+  to a git image (e.g. `alpine/git`) if your self-hosted host has no git; otherwise the checkout job
+  uses the host (GitHub-hosted and most self-hosted runners have git).
+- **`checkout` uploads the source** (minus hidden dirs like `.git`/`.github`) as a per-env artifact
+  (`cfn-src-<environment>`, unique so `dev` + `prod` in one run don't collide). `secret_scan` and
+  `lint` keep their own checkout (gitleaks needs git history; cfn-lint runs in a `python` image).
+- **Prefer the host?** Set `resolve_image`/`plan_image`/`apply_image` to `""` — on a GitHub-hosted
+  runner the AWS CLI + jq + git are preinstalled, so the deploy jobs run with zero install.
+- Tools **install only if missing** (`curl`/`wget`, or `pip` for cfn-lint); `cfn-run` auto-installs
+  a pinned `jq`. Consumers of a reusable workflow can't set `container:` on the calling job — these
+  image **inputs** are the override surface.
 
 ## Per-stack contract: `cfn-ci.env`
 

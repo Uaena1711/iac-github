@@ -3,6 +3,15 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.2.2
+
+- `cfn-env.yml`: **container-portable deploy jobs.** A standalone `checkout` job uploads the source
+  as a per-env artifact; `resolve`/`plan`/`apply` fetch it via `download-artifact` (a Node action,
+  no git/tar) and run in the **pinned `amazon/aws-cli` container** by default. This makes the
+  pipeline self-hostable with only Docker on the runner (the AWS CLI comes from the image, not the
+  host) while keeping the official minimal aws-cli image working. New `checkout_image` input; set
+  the deploy `*_image` to `""` to run on the host instead.
+
 ## 2.2.1
 
 - `cfn-env.yml`: the deploy jobs (`resolve`/`plan`/`apply`) now default to the **runner host**
