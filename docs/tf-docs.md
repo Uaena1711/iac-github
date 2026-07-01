@@ -33,7 +33,8 @@ no `terraform init`. It's a **no-op when the docs already match** (nothing to co
 |-------|---------|-------------|
 | `working_dir` | `.` | Root scanned for Terraform dirs to document. |
 | `commit_message` | `docs: regenerate terraform-docs [skip ci]` | Message for the doc commit — **keep the `[skip ci]` token**. |
-| `version` | `0.24.0` | terraform-docs version (pinned + checksum in the action). |
+| `version` | `0.24.0` | terraform-docs version (used only when the image/host lacks terraform-docs). |
+| `container_image` | `""` | Run the job inside this image (empty = the runner host). If it ships `terraform-docs`, it's reused. |
 | `runs_on` | `ubuntu-latest` | Runner label. |
 
 ## The `[skip ci]` loop guard

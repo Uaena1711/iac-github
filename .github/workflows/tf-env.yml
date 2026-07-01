@@ -35,6 +35,27 @@ on:
       secrets_provider:
         type: string
         default: ""                    # override each env's file-level SECRETS_PROVIDER (github | awssm | none)
+      container_image:
+        type: string
+        default: ""                    # shared fallback image for every job (empty = the runner host)
+      # Per-job images ship with sensible DEFAULTS — override only when you need to (e.g. the
+      # awssm provider needs `aws`, so point those jobs at an aws-capable image or "" for host).
+      # Set any to "" to run that job on the host. Each job runs in its OWN image.
+      secret_scan_image:
+        type: string
+        default: "zricethezav/gitleaks:v8.30.1"      # gitleaks baked in
+      lint_image:
+        type: string
+        default: "hashicorp/terraform:1.15.7"        # terraform (fmt); tflint auto-installs
+      resolve_image:
+        type: string
+        default: "hashicorp/terraform:1.15.7"        # git; jq auto-installs for the github provider
+      plan_image:
+        type: string
+        default: "hashicorp/terraform:1.15.7"        # terraform reused; jq auto-installs (github)
+      apply_image:
+        type: string
+        default: "hashicorp/terraform:1.15.7"        # terraform reused; jq auto-installs (github)
       tf_version:
         type: string
         default: "1.15.7"
@@ -73,6 +94,7 @@ concurrency:
 jobs:
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.secret_scan_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
@@ -81,6 +103,7 @@ jobs:
 
   lint:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.lint_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
@@ -92,6 +115,7 @@ jobs:
   # Resolve this env's identity (role/region) from its tf-ci.env.
   resolve:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.resolve_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     outputs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
@@ -116,6 +140,7 @@ jobs:
   plan:
     needs: [secret_scan, lint, resolve]
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.plan_image || inputs.container_image }}   # empty = shared/host
     permissions:
       id-token: write
       contents: read
@@ -168,6 +193,7 @@ jobs:
       ( inputs.mode == 'destroy' ||
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch) )
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.apply_image || inputs.container_image }}   # empty = shared/host
     permissions:
       id-token: write
       contents: read

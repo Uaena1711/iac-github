@@ -30,6 +30,21 @@ set -eu
 log() { printf '[resolve-env] %s\n'         "$*" >&2; }
 die() { printf '[resolve-env][error] %s\n'  "$*" >&2; exit 1; }
 
+JQ_VERSION="1.7.1"   # jq is needed by the shipped providers; auto-installed if the image lacks it
+JQ_SHA256="5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5"
+
+# Ensure jq is on PATH (a minimal container image may not have it). Pinned + checksum-verified.
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 && return 0
+  log "jq not found — installing pinned jq ${JQ_VERSION}"
+  _b="${RUNNER_TEMP:-/tmp}/iac-github-bin"; mkdir -p "$_b"
+  _u="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64"
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$_b/jq" "$_u"; else wget -qO "$_b/jq" "$_u"; fi
+  printf '%s  %s\n' "$JQ_SHA256" "$_b/jq" | sha256sum -c - >&2 || die "jq checksum mismatch"
+  chmod +x "$_b/jq"; PATH="$_b:$PATH"; export PATH
+  command -v jq >/dev/null 2>&1 || die "jq install failed"
+}
+
 DIR="${RESOLVE_DIR:?set RESOLVE_DIR}"
 FILE="${ENV_FILE:-tf-ci.env}"
 EMIT="${EMIT:-file}"
@@ -62,8 +77,18 @@ else
   # shellcheck disable=SC1090
   . "$plugin"
   command -v provider_resolve >/dev/null 2>&1 || die "provider '${provider}' does not define provider_resolve()"
-  if command -v provider_check >/dev/null 2>&1; then provider_check || die "provider '${provider}' preflight failed"; fi
 fi
+
+# Provider tools (jq, and the provider's own preflight) are only needed if the file actually
+# has a placeholder to resolve. A stack that keeps these keys literal (e.g. awssm identity
+# fields in the pre-OIDC resolve job) needs nothing — so a terraform image without aws is fine.
+_provider_ready=0
+provider_init() {
+  [ "$_provider_ready" = "1" ] && return 0
+  ensure_jq
+  if command -v provider_check >/dev/null 2>&1; then provider_check || die "provider '${provider}' preflight failed"; fi
+  _provider_ready=1
+}
 
 # optional key allowlist (file mode: pre-OIDC resolve job passes AWS_ROLE_ARN,AWS_REGION).
 ONLY="$(printf '%s' "${ONLY_KEYS:-}" | tr ',' ' ')"
@@ -76,6 +101,7 @@ in_scope() {
 # echo the resolved value for a ${ref} value.
 resolve_ref() {   # $1=key $2=value(${ref})
   [ "$provider" != "none" ] || die "value for ${1} is a \${ref} placeholder but no provider is set"
+  provider_init   # lazy: only demand jq/aws once we actually need to resolve something
   # shellcheck disable=SC2016  # strip the literal ${ and } delimiters
   _ref="${2#'${'}"; _ref="${_ref%'}'}"
   [ -n "$_ref" ] || die "empty placeholder for ${1}"

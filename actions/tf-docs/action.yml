@@ -22,13 +22,19 @@ runs:
   using: composite
   steps:
     - name: install terraform-docs
-      shell: bash
+      shell: sh
       env:
         V: ${{ inputs.version }}
         SHA: ${{ inputs.sha256 }}
       run: |
-        set -euo pipefail
-        curl -fsSL -o tfdocs.tgz \
+        set -eu
+        dl() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$1" "$2"; else wget -qO "$1" "$2"; fi; }
+        # Reuse a terraform-docs baked into the job's container image; else install the pin.
+        if command -v terraform-docs >/dev/null 2>&1; then
+          echo "[tf-docs] using preinstalled terraform-docs: $(terraform-docs --version 2>/dev/null || echo '?')"
+          exit 0
+        fi
+        dl tfdocs.tgz \
           "https://github.com/terraform-docs/terraform-docs/releases/download/v${V}/terraform-docs-v${V}-linux-amd64.tar.gz"
         echo "${SHA}  tfdocs.tgz" | sha256sum -c -
         mkdir -p "${RUNNER_TEMP}/tfdocs-bin"

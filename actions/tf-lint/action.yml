@@ -17,26 +17,38 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: hashicorp/setup-terraform@v3
+    # Reuse a terraform baked into the job's container image; else install the pin.
+    - id: probe
+      shell: sh
+      run: |
+        command -v terraform >/dev/null 2>&1 && echo "terraform=yes" >> "$GITHUB_OUTPUT" || echo "terraform=no" >> "$GITHUB_OUTPUT"
+    - if: steps.probe.outputs.terraform != 'yes'
+      uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: ${{ inputs.tf_version }}
         terraform_wrapper: false
     - name: terraform fmt -check
-      shell: bash
+      shell: sh
       env:
         P: ${{ inputs.path }}
       run: terraform fmt -check -recursive "$P"
     - name: tflint
-      shell: bash
+      shell: sh
       env:
         V: ${{ inputs.tflint_version }}
         SHA: ${{ inputs.tflint_sha256 }}
         P: ${{ inputs.path }}
       run: |
-        set -euo pipefail
-        curl -fsSL -o tflint.zip \
-          "https://github.com/terraform-linters/tflint/releases/download/v${V}/tflint_linux_amd64.zip"
-        echo "${SHA}  tflint.zip" | sha256sum -c -
-        unzip -o -q tflint.zip tflint
+        set -eu
+        dl() { if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$1" "$2"; else wget -qO "$1" "$2"; fi; }
+        # Reuse a tflint from the image; else install the pin.
+        if command -v tflint >/dev/null 2>&1; then
+          TFLINT=tflint
+        else
+          dl tflint.zip "https://github.com/terraform-linters/tflint/releases/download/v${V}/tflint_linux_amd64.zip"
+          echo "${SHA}  tflint.zip" | sha256sum -c -
+          unzip -o -q tflint.zip tflint
+          TFLINT="$PWD/tflint"
+        fi
         # core ruleset (no provider plugins required); respects a repo .tflint.hcl if present
-        ( cd "$P" && "$OLDPWD/tflint" --recursive )
+        ( cd "$P" && "$TFLINT" --recursive )

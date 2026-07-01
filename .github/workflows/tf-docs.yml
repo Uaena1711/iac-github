@@ -26,6 +26,9 @@ on:
       version:
         type: string
         default: "0.24.0"
+      container_image:
+        type: string
+        default: ""                # run in this image (empty = the runner host)
       runs_on:
         type: string
         default: "ubuntu-latest"
@@ -36,6 +39,7 @@ permissions:
 jobs:
   docs:
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.container_image }}   # empty = host
     permissions:
       contents: write            # commit the regenerated READMEs back to the branch
     steps:
@@ -47,11 +51,11 @@ jobs:
           working_dir: ${{ inputs.working_dir }}
           version: ${{ inputs.version }}
       - name: commit & push regenerated docs
-        shell: bash
+        shell: sh
         env:
           MSG: ${{ inputs.commit_message }}
         run: |
-          set -euo pipefail
+          set -eu
           if [ -z "$(git status --porcelain)" ]; then
             echo "terraform-docs already up to date — nothing to commit"
             exit 0
