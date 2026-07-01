@@ -181,7 +181,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       - id: r
-        uses: Uaena1711/iac-github/actions/cfn-run@v2
+        uses: Uaena1711/iac-github/actions/cfn-run@feat/cfn-container-portable
         with:
           command: ${{ inputs.mode == 'destroy' && 'destroy-plan' || 'plan' }}
           dir: ${{ inputs.dir }}
@@ -224,7 +224,7 @@ jobs:
           gh_secrets_json: ${{ toJSON(secrets) }}
       # No cfn-params.env injection here: unlike Terraform, `execute-change-set` uses the
       # parameters captured when the plan job created the change set — apply never re-reads them.
-      - uses: Uaena1711/iac-github/actions/cfn-run@v2
+      - uses: Uaena1711/iac-github/actions/cfn-run@feat/cfn-container-portable
         with:
           command: ${{ inputs.mode == 'destroy' && 'destroy' || 'apply' }}
           dir: ${{ inputs.dir }}
