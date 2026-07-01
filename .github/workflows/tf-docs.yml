@@ -28,7 +28,7 @@ on:
         default: "0.24.0"
       container_image:
         type: string
-        default: ""                # run in this image (GLIBC/Debian-based; empty = runner host)
+        default: ""                # run in this image (empty = the runner host)
       runs_on:
         type: string
         default: "ubuntu-latest"

@@ -30,6 +30,21 @@ set -eu
 log() { printf '[resolve-env] %s\n'         "$*" >&2; }
 die() { printf '[resolve-env][error] %s\n'  "$*" >&2; exit 1; }
 
+JQ_VERSION="1.7.1"   # jq is needed by the shipped providers; auto-installed if the image lacks it
+JQ_SHA256="5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5"
+
+# Ensure jq is on PATH (a minimal container image may not have it). Pinned + checksum-verified.
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 && return 0
+  log "jq not found — installing pinned jq ${JQ_VERSION}"
+  _b="${RUNNER_TEMP:-/tmp}/iac-github-bin"; mkdir -p "$_b"
+  _u="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64"
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$_b/jq" "$_u"; else wget -qO "$_b/jq" "$_u"; fi
+  printf '%s  %s\n' "$JQ_SHA256" "$_b/jq" | sha256sum -c - >&2 || die "jq checksum mismatch"
+  chmod +x "$_b/jq"; PATH="$_b:$PATH"; export PATH
+  command -v jq >/dev/null 2>&1 || die "jq install failed"
+}
+
 DIR="${RESOLVE_DIR:?set RESOLVE_DIR}"
 FILE="${ENV_FILE:-tf-ci.env}"
 EMIT="${EMIT:-file}"
@@ -62,6 +77,7 @@ else
   # shellcheck disable=SC1090
   . "$plugin"
   command -v provider_resolve >/dev/null 2>&1 || die "provider '${provider}' does not define provider_resolve()"
+  ensure_jq   # shipped providers parse JSON with jq; install it if the image lacks it
   if command -v provider_check >/dev/null 2>&1; then provider_check || die "provider '${provider}' preflight failed"; fi
 fi
 

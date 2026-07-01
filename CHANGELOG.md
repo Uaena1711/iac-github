@@ -5,12 +5,17 @@ This file lists changes to the iac-github Actions catalog. Versioning follows Se
 
 ## 2.1.0
 
-- Optional **container execution**: `tf-env.yml` and `tf-docs.yml` take a `container_image`
-  input — set it to run the jobs inside your own image (must be **glibc/Debian-based**;
-  Alpine breaks GitHub's in-container Node). Default `""` = run on the runner host (unchanged).
-- Building-block tools now **install only if missing**, so a container image that already
-  ships `terraform` / `tflint` / `gitleaks` / `terraform-docs` is reused instead of
-  reinstalled; on the bare host the pinned versions install as before. Backward-compatible.
+- Optional **container execution**. `tf-env.yml` takes a shared `container_image` plus
+  **per-job overrides** (`secret_scan_image`, `lint_image`, `resolve_image`, `plan_image`,
+  `apply_image`), each falling back to `container_image`. Each job runs in its OWN image and
+  only needs the tools its steps use, so a terraform job stays a terraform image instead of
+  one huge image. `tf-docs.yml` takes `container_image`. Default `""` = run on the runner host.
+- Building-block tools **install only if missing**, so an image that already ships `terraform`
+  / `tflint` / `gitleaks` / `terraform-docs` is reused instead of reinstalled; the host still
+  installs the pins. Actions are now **POSIX sh** and download via **curl or wget**, so minimal
+  images (e.g. the official `hashicorp/terraform`, which has no bash/curl) work. Note: GitHub
+  mounts its own Node into the job container, so both glibc and Alpine/musl images are fine.
+  Backward-compatible. (Verified live: the full flow ran in `hashicorp/terraform:1.15.7`.)
 
 ## 2.0.0
 
