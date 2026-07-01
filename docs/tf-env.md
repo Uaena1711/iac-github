@@ -61,8 +61,9 @@ ones you want gated. To deploy just one env, keep only that env's job.
 | `environment` | *(required)* | GitHub Environment used for the apply gate. |
 | `mode` | `deploy` | `deploy` or `destroy` (reviewed destroy-plan behind the gate). |
 | `secrets_provider` | `""` | Override each env's file-level `SECRETS_PROVIDER` (`github` \| `awssm` \| `none`). |
-| `container_image` | `""` | Shared image for all jobs (empty = the runner host). See [Running in a container](#running-in-a-container). |
-| `secret_scan_image` / `lint_image` / `resolve_image` / `plan_image` / `apply_image` | `""` | Per-job image override; empty falls back to `container_image`. |
+| `container_image` | `""` | Shared fallback image (used when a per-job image is empty). See [Running in a container](#running-in-a-container). |
+| `secret_scan_image` | `zricethezav/gitleaks:v8.30.1` | secret-scan job's image. |
+| `lint_image` / `resolve_image` / `plan_image` / `apply_image` | `hashicorp/terraform:1.15.7` | those jobs' images. Set `""` to run on the host, or override per your needs. |
 | `tf_version` | `1.15.7` | Terraform version (used only when installing on the host / an image without terraform). |
 | `default_region` | `""` | Fallback AWS region when a stack's `tf-ci.env` omits `AWS_REGION`. |
 | `runs_on` | `ubuntu-latest` | Runner label. |
@@ -72,33 +73,31 @@ ones you want gated. To deploy just one env, keep only that env's job.
 
 ## Running in a container
 
-By default jobs run on the runner host (`ubuntu-latest`) and each tool is installed at its
-pinned version. You can instead run jobs inside images — **one per job**, so each job only
-carries the tools its own steps use (a terraform job stays a terraform image):
+**By default each job runs in a purpose-built image** — the secret scan in a gitleaks image,
+the terraform jobs in the official `hashicorp/terraform` image — so a tool the image already
+ships is reused, not reinstalled. Override only when you need to (set any `*_image` to `""` to
+run that job on the host):
 
 ```yaml
 jobs:
-  dev:
+  prod:
     uses: Uaena1711/iac-github/.github/workflows/tf-env.yml@v2
     with:
-      dir: envs/dev
-      environment: dev
-      plan_image: hashicorp/terraform:1.15.7     # terraform jobs → terraform image
-      apply_image: hashicorp/terraform:1.15.7
-      lint_image: hashicorp/terraform:1.15.7     # has terraform for fmt; tflint auto-installs
-      # secret_scan_image / resolve_image left empty → run on the host
+      dir: envs/prod
+      environment: prod
+      # awssm needs the aws CLI, which the terraform image lacks -> run these on the host:
+      plan_image: ""
+      apply_image: ""
 ```
 
-Each `*_image` falls back to the shared `container_image` (which falls back to the host).
-
 - **Alpine works.** GitHub mounts its own Node into the job container, so both glibc and
-  Alpine/musl images are fine — the official `hashicorp/terraform` (Alpine) is verified.
-- Tools are **installed only if missing**: an image that already ships `terraform` / `tflint`
-  / `gitleaks` / `terraform-docs` is reused (no reinstall); anything absent installs at the
-  pin (via `curl` or `wget`). Actions are POSIX `sh`, so no `bash` needed.
-- **A terraform job only needs terraform + git.** `jq`/`aws` are needed by `resolve-env`
-  *only* when a stack resolves values from a vault (`SECRETS_PROVIDER=github`/`awssm`); with a
-  literal `tf-ci.env` the plan/apply jobs are pure terraform (verified in `terraform:1.15.7`).
+  Alpine/musl images are fine — the default `hashicorp/terraform` (Alpine) is verified.
+- Tools **install only if missing**: an image that ships `terraform`/`tflint`/`gitleaks`/
+  `terraform-docs` is reused; anything absent installs at the pin (via `curl` or `wget`).
+  Actions are POSIX `sh` — no `bash` needed. `resolve-env` also auto-installs a pinned `jq`.
+- **A terraform job only needs terraform + git.** `jq` is auto-installed for the `github`
+  provider; only `awssm` needs `aws` in the image — so for `awssm` point those jobs at an
+  aws-capable image or `""` (host). A stack with a literal `tf-ci.env` needs no vault tools.
 - Consumers of a reusable workflow can't set `container:` on the calling job; these image
   **inputs** are the override surface.
 
