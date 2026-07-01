@@ -128,6 +128,21 @@ stack_status() {
   esac
 }
 
+# Print the change set's resource-level diff so a reviewer can see WHAT apply will do before
+# approving the gate (the `terraform plan` equivalent). Input: the describe-change-set JSON.
+render_change_set() {
+  _n="$(printf '%s' "$1" | jq -r '.Changes | length')"
+  log_info "----- change set ${cs} (${cstype}) for ${STACK_NAME}: ${_n} resource change(s) -----"
+  printf '%s' "$1" | jq -r '
+    .Changes[]?.ResourceChange
+    | (({"Add":"+","Modify":"~","Remove":"-","Import":"i","Dynamic":"?"})[.Action] // "?") as $s
+    | "  " + $s + " " + .Action + "  " + .LogicalResourceId + "  (" + .ResourceType + ")"
+      + (if .Replacement=="True" then "  [REPLACEMENT]"
+         elif .Replacement=="Conditional" then "  [may replace]" else "" end)
+      + (if ((.Scope // []) | length) > 0 then "  scope=" + (.Scope | join(",")) else "" end)'
+  log_info "----- end change set -----"
+}
+
 ACTION="${COMMAND:?usage: run.sh plan|apply|destroy-plan|destroy}"
 : "${CFN_WORKSPACE_DIR:?missing CFN_WORKSPACE_DIR}"
 STATUS_FILE="changeset.status"
@@ -212,7 +227,8 @@ case "$ACTION" in
           die "change set for ${STACK_NAME} failed: ${reason}" ;;
       esac
     else
-      log_info "changes detected for ${STACK_NAME}; change set ${cs} saved"
+      render_change_set "$desc"
+      log_info "change set ${cs} saved for ${STACK_NAME} (review the diff above before approving apply)"
       printf '%s\n' "$cs"     > "$NAME_FILE"
       printf '%s\n' "$cstype" > "$TYPE_FILE"
       printf 'changed\n'      > "$STATUS_FILE"
