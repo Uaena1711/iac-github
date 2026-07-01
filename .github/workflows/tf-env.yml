@@ -1,9 +1,10 @@
 # =============================================================================
 # iac-github :: per-environment Terraform flow (the building-block path).
 #
-#   secret_scan ─┐
+#   checkout ────┐  (uploads the source as an artifact via checkout-artifact)
+#   secret_scan ─┤
 #   lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check        (ONE workspace per call)
-#                │
+#                │   (resolve/plan/apply pull the source via download-artifact — no git/tar needed)
 # The consumer calls this ONCE PER ENV and decides per env whether it's gated, e.g.:
 #
 #   jobs:
@@ -41,6 +42,9 @@ on:
       # Per-job images ship with sensible DEFAULTS — override only when you need to (e.g. the
       # awssm provider needs `aws`, so point those jobs at an aws-capable image or "" for host).
       # Set any to "" to run that job on the host. Each job runs in its OWN image.
+      checkout_image:
+        type: string
+        default: ""                    # host (git present); a git image (e.g. alpine/git) for a pure-Docker self-hosted runner
       secret_scan_image:
         type: string
         default: "zricethezav/gitleaks:v8.30.1"      # gitleaks baked in
@@ -92,13 +96,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Single checkout for the deploy jobs: upload the source as a per-env artifact so resolve/plan/
+  # apply can pull it without needing git/tar in their image (download-artifact is a Node action).
+  checkout:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
+    permissions: { contents: read }
+    steps:
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: upload
+          name: tf-src-${{ inputs.environment }}
+
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.secret_scan_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
       - uses: Uaena1711/iac-github/actions/secret-scan@v2
 
   lint:
@@ -114,6 +130,7 @@ jobs:
 
   # Resolve this env's identity (role/region) from its tf-ci.env.
   resolve:
+    needs: [checkout]
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.resolve_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
@@ -121,7 +138,10 @@ jobs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
       region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: tf-src-${{ inputs.environment }}
       # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
       # like awssm keeps these literal, github resolves them from vars/secrets.
       - uses: Uaena1711/iac-github/actions/resolve-env@v2
@@ -138,7 +158,7 @@ jobs:
           default_region: ${{ inputs.default_region }}
 
   plan:
-    needs: [secret_scan, lint, resolve]
+    needs: [checkout, secret_scan, lint, resolve]
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.plan_image || inputs.container_image }}   # empty = shared/host
     permissions:
@@ -147,7 +167,10 @@ jobs:
     outputs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: tf-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
@@ -187,7 +210,7 @@ jobs:
 
   # Runs ONLY when the plan has changes — so an unchanged env never fires its approval gate.
   apply:
-    needs: [resolve, plan]
+    needs: [checkout, resolve, plan]
     if: >-
       needs.plan.outputs.has_changes == 'true' &&
       ( inputs.mode == 'destroy' ||
@@ -199,7 +222,10 @@ jobs:
       contents: read
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: tf-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
@@ -232,14 +258,15 @@ jobs:
           tf_apply_options: ${{ inputs.tf_apply_options }}
 
   check:
-    needs: [secret_scan, lint, resolve, plan, apply]
+    needs: [checkout, secret_scan, lint, resolve, plan, apply]
     if: always()
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
       - name: roll up results
         run: |
-          echo "secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          echo "checkout=${{ needs.checkout.result }} secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          [ "${{ needs.checkout.result }}" = "success" ] || { echo "checkout failed"; exit 1; }
           [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
           [ "${{ needs.lint.result }}" = "success" ] || { echo "lint failed"; exit 1; }
           [ "${{ needs.resolve.result }}" = "success" ] || { echo "resolve failed"; exit 1; }

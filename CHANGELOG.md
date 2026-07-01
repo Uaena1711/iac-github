@@ -3,14 +3,19 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
-## 2.2.2
+## 2.3.0
 
-- `cfn-env.yml`: **container-portable deploy jobs.** A standalone `checkout` job uploads the source
-  as a per-env artifact; `resolve`/`plan`/`apply` fetch it via `download-artifact` (a Node action,
-  no git/tar) and run in the **pinned `amazon/aws-cli` container** by default. This makes the
-  pipeline self-hostable with only Docker on the runner (the AWS CLI comes from the image, not the
-  host) while keeping the official minimal aws-cli image working. New `checkout_image` input; set
-  the deploy `*_image` to `""` to run on the host instead.
+- Add [`checkout-artifact`](actions/checkout-artifact) (Tier 1): a shared building block that
+  uploads the checked-out source as a per-env artifact (`mode: upload`) and restores it in later
+  jobs (`mode: download`). One place for the source-passing policy (artifact naming, hidden-file
+  exclusion, retention).
+- **`cfn-env.yml` and `tf-env.yml` are now container-portable.** Both gained a standalone `checkout`
+  job (via `checkout-artifact`); `resolve`/`plan`/`apply` fetch the source with `download-artifact`
+  (a Node action — no git/tar), so the deploy jobs run in a minimal image (e.g. the pinned official
+  `amazon/aws-cli`, which lacks git/tar). This makes the pipelines **self-hostable with only Docker**
+  on the runner — the CLI comes from the image, not tools you maintain on the host. New
+  `checkout_image` input on both; `cfn-env` deploy jobs default to `amazon/aws-cli:2.35.13` (set
+  `*_image` to `""` for the host).
 
 ## 2.2.1
 

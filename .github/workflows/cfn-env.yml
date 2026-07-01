@@ -85,13 +85,10 @@ jobs:
     container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
     permissions: { contents: read }
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/upload-artifact@v4
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
+          mode: upload
           name: cfn-src-${{ inputs.environment }}
-          path: .                       # v4 excludes hidden files by default -> no .git/.github
-          retention-days: 1
-          overwrite: true
 
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
@@ -122,8 +119,9 @@ jobs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
       region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
+          mode: download
           name: cfn-src-${{ inputs.environment }}
       # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
       # like awssm keeps these literal, github resolves them from vars/secrets.
@@ -153,8 +151,9 @@ jobs:
     outputs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
+          mode: download
           name: cfn-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
@@ -206,8 +205,9 @@ jobs:
       contents: read
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
+          mode: download
           name: cfn-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
