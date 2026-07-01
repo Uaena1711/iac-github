@@ -3,6 +3,13 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.2.1
+
+- `cfn-env.yml`: the deploy jobs (`resolve`/`plan`/`apply`) now default to the **runner host**
+  instead of `amazon/aws-cli`. GitHub runners preinstall the AWS CLI + jq + git, and the minimal
+  aws-cli image lacks `git`/`tar` so `actions/checkout` failed inside it. Point the `*_image`
+  inputs at an AWS-capable image (with git or tar) to containerize.
+
 ## 2.2.0
 
 - Add a **CloudFormation pipeline** alongside the Terraform one. `cfn-env.yml` is a

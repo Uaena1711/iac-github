@@ -66,29 +66,26 @@ ones you want gated. To deploy just one env, keep only that env's job.
 | `container_image` | `""` | Shared fallback image (used when a per-job image is empty). See [Running in a container](#running-in-a-container). |
 | `secret_scan_image` | `zricethezav/gitleaks:v8.30.1` | secret-scan job's image. |
 | `lint_image` | `python:3.12-slim` | lint job's image (cfn-lint auto-installs via pip). |
-| `resolve_image` / `plan_image` / `apply_image` | `amazon/aws-cli:2.35.13` | those jobs' images. Set `""` to run on the host, or override per your needs. |
+| `resolve_image` / `plan_image` / `apply_image` | `""` (host) | those jobs run on the runner host by default (AWS CLI + jq + git preinstalled). Point at an AWS-capable image (with git or tar for checkout) to containerize. |
 | `default_region` | `""` | Fallback AWS region when a stack's `cfn-ci.env` omits `AWS_REGION`. |
 | `runs_on` | `ubuntu-latest` | Runner label. |
 | `lint_path` | `.` | Directory scanned for templates to cfn-lint. |
 | `template_bucket` | `""` | Optional S3 bucket → `aws cloudformation package` runs first (nested templates / inline Lambda / templates over the inline size limit). |
 
-## Running in a container
+## Where each job runs
 
-**By default each job runs in a purpose-built image** — the secret scan in a gitleaks image, the
-deploy jobs in the official `amazon/aws-cli` image, the lint job in a `python` image — so a tool
-the image already ships is reused, not reinstalled. Override only when you need to (set any
-`*_image` to `""` to run that job on the host).
-
-- **Alpine works.** GitHub mounts its own Node into the job container, so both glibc and
-  Alpine/musl images are fine.
-- Tools **install only if missing**: an image that ships `gitleaks`/`cfn-lint`/`jq` is reused;
-  anything absent installs at the pin (via `curl` or `wget`, or `pip` for cfn-lint). Actions are
-  POSIX `sh` — no `bash` needed. `cfn-run` auto-installs a pinned `jq`.
-- **The deploy jobs only need the AWS CLI + git.** `jq` is auto-installed. `cfn-lint` is a Python
-  tool, so the lint job defaults to a `python` image and pip-installs the pin; point `lint_image`
-  at an image that already ships cfn-lint to skip the install.
-- Consumers of a reusable workflow can't set `container:` on the calling job; these image
-  **inputs** are the override surface.
+- **The deploy jobs (`resolve`/`plan`/`apply`) run on the runner host by default** — GitHub-hosted
+  runners already ship the AWS CLI, `jq`, and `git`, so there's nothing to containerize (unlike the
+  Terraform pipeline, which uses a container to avoid reinstalling terraform).
+- **`secret_scan` and `lint` run in purpose-built images** by default (gitleaks; a `python` image
+  for cfn-lint) so their tool is reused, not reinstalled.
+- **To containerize the deploy jobs**, set `resolve_image`/`plan_image`/`apply_image` to an
+  AWS-capable image. It must also contain **`git` or `tar`** (for `actions/checkout`) — minimal
+  images like `amazon/aws-cli` have neither and will fail checkout; an Alpine-based image with the
+  AWS CLI + busybox works (GitHub mounts its own Node, so glibc and musl are both fine).
+- Tools **install only if missing** (via `curl`/`wget`, or `pip` for cfn-lint); `cfn-run`
+  auto-installs a pinned `jq`. Consumers of a reusable workflow can't set `container:` on the
+  calling job — these image **inputs** are the override surface.
 
 ## Per-stack contract: `cfn-ci.env`
 
