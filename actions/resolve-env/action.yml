@@ -20,10 +20,10 @@ inputs:
       backend secrets before the role is assumed.
     default: ""
   gh_vars_json:
-    description: 'JSON map of GitHub Actions variables (pass ${{ toJSON(vars) }}); used by the github provider.'
+    description: "JSON map of GitHub Actions variables (caller passes toJSON of the vars context); used by the github provider."
     default: ""
   gh_secrets_json:
-    description: 'JSON map of GitHub Actions secrets (pass ${{ toJSON(secrets) }}); used by the github provider.'
+    description: "JSON map of GitHub Actions secrets (caller passes toJSON of the secrets context); used by the github provider."
     default: ""
   region:
     description: AWS region for provider API calls (awssm). Empty = inherit the ambient AWS_REGION.
