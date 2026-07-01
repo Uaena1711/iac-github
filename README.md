@@ -12,7 +12,7 @@ approval gating.
 
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
-| Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,tf-run}` (composite) | Reusable steps you can compose yourself |
+| Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,resolve-env,tf-run}` (composite) | Reusable steps you can compose yourself |
 | Per-env flow (Tier 2) | `.github/workflows/tf-env.yml` (reusable workflow) | One environment, end-to-end |
 
 You call `tf-env.yml` **once per environment** and decide gating per env. Each call is its
@@ -80,6 +80,30 @@ AWS_STATE_KMS_KEY=<kms-key-arn>                       # SSE-KMS for state
 
 `tf-env` reads these (role/region) to federate that env's jobs to its own role. No static
 cloud keys, ever.
+
+### Resolving values from a secret vault (optional)
+
+Any `tf-ci.env` value can be a `${REF}` placeholder pulled from a secret store instead of
+being committed. Pick the provider **at the file level** with `SECRETS_PROVIDER=` (or
+override per-run with the `secrets_provider` workflow input); plain values are left alone.
+
+```sh
+SECRETS_PROVIDER=github                       # github | awssm | none (default)
+AWS_ROLE_ARN=arn:aws:iam::<account-id>:role/<role>
+AWS_REGION=us-east-1
+AWS_STATE_BUCKET=${TF_STATE_BUCKET_DEV}        # ← resolved from the vault
+```
+
+The `resolve-env` action fetches each placeholder, **masks** it, and rewrites the file in
+place (job-local — resolved secrets are never uploaded as artifacts). Shipped providers:
+
+| `SECRETS_PROVIDER` | `${REF}` means | Source | Notes |
+|--------------------|----------------|--------|-------|
+| `github` | a variable/secret **name** | `vars`/`secrets` (needs `secrets: inherit` on the caller) | resolves any field, incl. `AWS_ROLE_ARN` |
+| `awssm` | a Secrets Manager `secret-id[#json-field]` | AWS Secrets Manager | runs **after** OIDC → keep `AWS_ROLE_ARN`/`AWS_REGION` literal (or use `github` for them) |
+
+Add your own by dropping one `actions/resolve-env/providers/<name>.sh` — see that dir's
+`README.md`. Legacy literal `tf-ci.env` files (no `SECRETS_PROVIDER`) keep working unchanged.
 
 ### One-time AWS trust policy (per role, set up outside this catalog)
 

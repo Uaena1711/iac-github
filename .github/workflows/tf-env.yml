@@ -32,6 +32,9 @@ on:
       mode:
         type: string
         default: "deploy"              # deploy | destroy
+      secrets_provider:
+        type: string
+        default: ""                    # override each env's file-level SECRETS_PROVIDER (github | awssm | none)
       tf_version:
         type: string
         default: "1.15.7"
@@ -95,6 +98,15 @@ jobs:
       region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
     steps:
       - uses: actions/checkout@v5
+      # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
+      # like awssm keeps these literal, github resolves them from vars/secrets.
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          only_keys: AWS_ROLE_ARN,AWS_REGION
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
       - id: d
         uses: Uaena1711/iac-github/actions/detect-changes@feat/per-env-path-b
         with:
@@ -115,6 +127,14 @@ jobs:
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve the remaining backend secrets (awssm can now reach the account).
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
       - id: r
         uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
         with:
@@ -146,6 +166,14 @@ jobs:
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
           region: ${{ needs.resolve.outputs.region }}
+      # Post-OIDC: resolve backend secrets the same way the plan job did.
+      - uses: Uaena1711/iac-github/actions/resolve-env@feat/per-env-path-b
+        with:
+          dir: ${{ inputs.dir }}
+          provider: ${{ inputs.secrets_provider }}
+          region: ${{ needs.resolve.outputs.region }}
+          gh_vars_json: ${{ toJSON(vars) }}
+          gh_secrets_json: ${{ toJSON(secrets) }}
       - uses: Uaena1711/iac-github/actions/tf-run@feat/per-env-path-b
         with:
           command: apply

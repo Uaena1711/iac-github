@@ -12,7 +12,13 @@ This file lists changes to the iac-github Actions catalog. Versioning follows Se
   `tf-env.yml` job per env (see the example repo).
 - apply runs only when the plan has changes, so an unchanged env never fires its approval
   gate (`tf-run` now exposes a `has_changes` output).
-- Building blocks unchanged: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `tf-run`.
+- Add a `resolve-env` building block: an env's `tf-ci.env` picks a secret provider at the
+  file level (`SECRETS_PROVIDER=`, overridable by the `secrets_provider` input) and uses
+  `${REF}` placeholders that are pulled from a vault, masked, and written back in place
+  (job-local, never an artifact). Providers are plugins (`providers/<name>.sh`); `github`
+  (vars/secrets) and `awssm` (Secrets Manager) ship in the box. Backward-compatible:
+  literal `tf-ci.env` files (no `SECRETS_PROVIDER`) are untouched.
+- Building blocks: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `tf-run`, `resolve-env`.
 
 ## 1.2.0
 

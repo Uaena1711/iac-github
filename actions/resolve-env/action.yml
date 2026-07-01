@@ -1,0 +1,45 @@
+name: resolve-env
+description: >-
+  Resolve ${ref} placeholders in a workspace tf-ci.env from a secret provider. The
+  provider is chosen at the file level (SECRETS_PROVIDER=), pluggable via providers/<name>.sh.
+
+inputs:
+  dir:
+    description: Workspace directory holding the env file.
+    required: true
+  provider:
+    description: Override the file-level SECRETS_PROVIDER (github | awssm | none | ...). Empty = use the file's.
+    default: ""
+  env_file:
+    description: Env file name within the workspace.
+    default: "tf-ci.env"
+  only_keys:
+    description: >-
+      Comma/space list; when set, resolve ONLY these keys (others copied verbatim). Used in
+      the pre-OIDC resolve job so a creds-needing provider (awssm) doesn't try to resolve
+      backend secrets before the role is assumed.
+    default: ""
+  gh_vars_json:
+    description: 'JSON map of GitHub Actions variables (pass ${{ toJSON(vars) }}); used by the github provider.'
+    default: ""
+  gh_secrets_json:
+    description: 'JSON map of GitHub Actions secrets (pass ${{ toJSON(secrets) }}); used by the github provider.'
+    default: ""
+  region:
+    description: AWS region for provider API calls (awssm). Empty = inherit the ambient AWS_REGION.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: sh
+      env:
+        RESOLVE_DIR: ${{ inputs.dir }}
+        ENV_FILE: ${{ inputs.env_file }}
+        PROVIDER_INPUT: ${{ inputs.provider }}
+        ONLY_KEYS: ${{ inputs.only_keys }}
+        GH_VARS_JSON: ${{ inputs.gh_vars_json }}
+        GH_SECRETS_JSON: ${{ inputs.gh_secrets_json }}
+        PROVIDER_REGION: ${{ inputs.region }}
+      run: sh "$GITHUB_ACTION_PATH/resolve-env.sh"
