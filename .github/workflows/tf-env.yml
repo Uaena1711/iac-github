@@ -103,7 +103,7 @@ jobs:
     container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
     permissions: { contents: read }
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/cfn-container-portable
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: upload
           name: tf-src-${{ inputs.environment }}
@@ -138,7 +138,7 @@ jobs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
       region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/cfn-container-portable
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: download
           name: tf-src-${{ inputs.environment }}
@@ -167,7 +167,7 @@ jobs:
     outputs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/cfn-container-portable
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: download
           name: tf-src-${{ inputs.environment }}
@@ -222,7 +222,7 @@ jobs:
       contents: read
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/cfn-container-portable
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: download
           name: tf-src-${{ inputs.environment }}
