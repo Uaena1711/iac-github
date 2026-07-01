@@ -38,6 +38,7 @@ Composite actions you can compose into your own workflow. Each has its own `acti
 
 | Action | Purpose |
 |--------|---------|
+| [`checkout-artifact`](actions/checkout-artifact) | Share the checked-out source across jobs via an artifact (upload/download) — lets deploy jobs run in a minimal image |
 | [`secret-scan`](actions/secret-scan) | gitleaks secret scan (pinned + checksum) — gate before cloud access |
 | [`tf-lint`](actions/tf-lint) | `terraform fmt -check` + tflint (pinned) |
 | [`detect-changes`](actions/detect-changes) | Map changed files to Terraform/CloudFormation stacks → job matrix (configurable `marker`/`env_file`) |

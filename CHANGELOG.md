@@ -3,6 +3,28 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.3.0
+
+- `cfn-run` **prints the change-set resource diff** in the `plan` job (Add/Modify/Remove per
+  resource, with `[REPLACEMENT]` and scope) to the log **and renders it as a table on the run's
+  Summary page** — so a reviewer sees what apply will change before approving the gate (the
+  `terraform plan` / GitLab `view_changes` equivalent).
+- `cfn-run` resolves `TEMPLATE` and `PARAMETERS` **from the repo root** (not the stack dir), so all
+  environments can **share ONE template** (`templates/app.yaml`) instead of copying it per env;
+  per-env differences live in `parameters.json` / `cfn-params.env`. Paths are still validated
+  (no `/`, no `..`) so nothing escapes the repo.
+- Add [`checkout-artifact`](actions/checkout-artifact) (Tier 1): a shared building block that
+  uploads the checked-out source as a per-env artifact (`mode: upload`) and restores it in later
+  jobs (`mode: download`). One place for the source-passing policy (artifact naming, hidden-file
+  exclusion, retention).
+- **`cfn-env.yml` and `tf-env.yml` are now container-portable.** Both gained a standalone `checkout`
+  job (via `checkout-artifact`); `resolve`/`plan`/`apply` fetch the source with `download-artifact`
+  (a Node action — no git/tar), so the deploy jobs run in a minimal image (e.g. the pinned official
+  `amazon/aws-cli`, which lacks git/tar). This makes the pipelines **self-hostable with only Docker**
+  on the runner — the CLI comes from the image, not tools you maintain on the host. New
+  `checkout_image` input on both; `cfn-env` deploy jobs default to `amazon/aws-cli:2.35.13` (set
+  `*_image` to `""` for the host).
+
 ## 2.2.1
 
 - `cfn-env.yml`: the deploy jobs (`resolve`/`plan`/`apply`) now default to the **runner host**

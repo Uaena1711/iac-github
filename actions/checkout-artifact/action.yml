@@ -1,0 +1,48 @@
+name: checkout-artifact
+description: >-
+  Share the checked-out source across jobs via an artifact. `mode: upload` checks out and uploads
+  the source once; `mode: download` restores it in a later job. Lets deploy jobs run in a minimal
+  image (e.g. amazon/aws-cli) that lacks git/tar — download-artifact is a Node action, so it needs
+  neither — which is what makes the Tier-2 pipelines self-hostable with only Docker on the runner.
+
+# Building block (Tier 1). Cloud-agnostic — used by tf-env and cfn-env alike so the source-passing
+# policy (artifact naming, hidden-file exclusion, retention) lives in ONE place.
+inputs:
+  mode:
+    description: "upload (checkout + upload artifact) | download (fetch the artifact)"
+    required: true
+  name:
+    description: Artifact name. Make it unique per env (e.g. cfn-src-<environment>) so parallel calls don't collide.
+    required: true
+  path:
+    description: Path to upload from / restore into (default the workspace root).
+    default: "."
+  fetch_depth:
+    description: "(upload) actions/checkout fetch-depth (0 = full history)."
+    default: "1"
+
+runs:
+  using: composite
+  steps:
+    - if: ${{ inputs.mode == 'upload' }}
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: ${{ inputs.fetch_depth }}
+    - if: ${{ inputs.mode == 'upload' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        # v4 excludes hidden files (.git/.github) by default; short retention (job-local hand-off).
+        retention-days: 1
+        overwrite: true
+    - if: ${{ inputs.mode == 'download' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+    - if: ${{ inputs.mode != 'upload' && inputs.mode != 'download' }}
+      shell: sh
+      run: |
+        echo "checkout-artifact: invalid mode '${{ inputs.mode }}' (expected upload|download)" >&2
+        exit 1

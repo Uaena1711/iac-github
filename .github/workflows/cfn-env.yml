@@ -1,23 +1,19 @@
 # =============================================================================
 # iac-github :: per-environment CloudFormation flow (the building-block path).
 #
-#   secret_scan ─┐
-#   lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check        (ONE stack per call)
-#                │
-# The consumer calls this ONCE PER ENV, e.g.:
-#
-#   jobs:
-#     dev:  { uses: .../cfn-env.yml@v2, with: { dir: stacks/dev,  environment: dev  } }
-#     prod: { uses: .../cfn-env.yml@v2, with: { dir: stacks/prod, environment: prod } }
+#   checkout ────┐  (uploads the source as an artifact — the only job that needs git)
+#   secret_scan ─┤
+#   lint ────────┼─▶ resolve ─▶ plan ─▶ apply ─▶ check     (ONE stack per call)
+#                │   (download-artifact + run in an aws image — no git/tar needed)
 #
 # The change set IS the plan: `plan` creates+describes it, `apply` executes the exact saved one
-# after the Environment gate (dev: no reviewer = auto; prod: reviewer = approval). apply only
-# runs when the change set has changes, so an unchanged prod never fires its gate. Identity
-# (role/region) + stack config are read from the stack's cfn-ci.env.
+# after the Environment gate (dev: no reviewer = auto; prod: reviewer = approval).
 #
-# The deploy jobs default to the runner HOST (GitHub runners preinstall the AWS CLI + jq + git),
-# so there's nothing to containerize; secret_scan/lint default to purpose-built images. Point the
-# *_image inputs at an AWS-capable image (that also has git or tar for checkout) to containerize.
+# Why a standalone `checkout` job? So the deploy jobs (resolve/plan/apply) can run in the minimal
+# official `amazon/aws-cli` image, which has NO git/tar (so `actions/checkout` fails in it). They
+# fetch the source via `actions/download-artifact` instead — a Node action that needs no git/tar —
+# so a self-hosted runner only needs Docker + a pinned aws image, nothing installed on the host.
+#
 # Inner action refs are full-path @v2 (a reusable workflow's `./local` resolves against the
 # CALLER repo). release.yml moves the floating v2.
 # =============================================================================
@@ -41,8 +37,10 @@ on:
       container_image:
         type: string
         default: ""                    # shared fallback image for every job (empty = the runner host)
-      # Per-job images ship with sensible DEFAULTS — override only when you need to. Set any to
-      # "" to run that job on the host. Each job runs in its OWN image.
+      # Per-job images ship with sensible DEFAULTS. Set any to "" to run that job on the host.
+      checkout_image:
+        type: string
+        default: ""                    # host (git present); point at a git image (e.g. alpine/git) for a pure-Docker self-hosted runner
       secret_scan_image:
         type: string
         default: "zricethezav/gitleaks:v8.30.1"      # gitleaks baked in
@@ -51,13 +49,13 @@ on:
         default: "python:3.12-slim"                  # cfn-lint auto-installs via pip
       resolve_image:
         type: string
-        default: ""                                  # host: runner ships aws + jq + git
+        default: "amazon/aws-cli:2.35.13"            # aws CLI (pinned); jq auto-installs; source via artifact
       plan_image:
         type: string
-        default: ""                                  # host: runner ships aws + jq + git
+        default: "amazon/aws-cli:2.35.13"            # aws CLI (pinned); jq auto-installs; source via artifact
       apply_image:
         type: string
-        default: ""                                  # host: runner ships aws + jq + git
+        default: "amazon/aws-cli:2.35.13"            # aws CLI (pinned); jq auto-installs; source via artifact
       default_region:
         type: string
         default: ""
@@ -79,13 +77,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Single checkout for the deploy jobs: upload the source (minus hidden dirs like .git/.github)
+  # so resolve/plan/apply can pull it without git/tar. Unique artifact name per env so a caller
+  # running dev + prod in one run doesn't collide.
+  checkout:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
+    permissions: { contents: read }
+    steps:
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: upload
+          name: cfn-src-${{ inputs.environment }}
+
   secret_scan:
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.secret_scan_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
       - uses: Uaena1711/iac-github/actions/secret-scan@v2
 
   lint:
@@ -98,8 +109,9 @@ jobs:
         with:
           path: ${{ inputs.lint_path }}
 
-  # Resolve this stack's identity (role/region) from its cfn-ci.env.
+  # Resolve this stack's identity (role/region) from its cfn-ci.env. Source comes from the artifact.
   resolve:
+    needs: [checkout, secret_scan, lint]
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.resolve_image || inputs.container_image }}   # empty = shared/host
     permissions: { contents: read }
@@ -107,7 +119,10 @@ jobs:
       role_arn: ${{ fromJSON(steps.d.outputs.matrix)[0].role_arn }}
       region: ${{ fromJSON(steps.d.outputs.matrix)[0].region }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: cfn-src-${{ inputs.environment }}
       # Resolve ONLY the OIDC identity fields here (pre-role): a creds-needing provider
       # like awssm keeps these literal, github resolves them from vars/secrets.
       - uses: Uaena1711/iac-github/actions/resolve-env@v2
@@ -127,7 +142,7 @@ jobs:
           default_region: ${{ inputs.default_region }}
 
   plan:
-    needs: [secret_scan, lint, resolve]
+    needs: [checkout, resolve]
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.plan_image || inputs.container_image }}   # empty = shared/host
     permissions:
@@ -136,7 +151,10 @@ jobs:
     outputs:
       has_changes: ${{ steps.r.outputs.has_changes }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: cfn-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
@@ -151,8 +169,7 @@ jobs:
           gh_vars_json: ${{ toJSON(vars) }}
           gh_secrets_json: ${{ toJSON(secrets) }}
       # Inject sensitive CloudFormation parameters from cfn-params.env as CFN_PARAM_* env —
-      # masked, never written to disk. These are captured into the change set at create time.
-      # No-op if the stack has no cfn-params.env.
+      # masked, never written to disk. Captured into the change set at create time.
       - uses: Uaena1711/iac-github/actions/resolve-env@v2
         with:
           dir: ${{ inputs.dir }}
@@ -177,7 +194,7 @@ jobs:
   # or delete a stack); the Environment reviewer is the second gate. mode=destroy is a deliberate
   # workflow_dispatch (write-access) action on the default branch.
   apply:
-    needs: [resolve, plan]
+    needs: [checkout, resolve, plan]
     if: >-
       needs.plan.outputs.has_changes == 'true' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -188,7 +205,10 @@ jobs:
       contents: read
     environment: ${{ inputs.environment }}   # dev: no reviewer = auto · prod: reviewer = gate
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: cfn-src-${{ inputs.environment }}
       - uses: Uaena1711/iac-github/actions/aws-oidc@v2
         with:
           role_arn: ${{ needs.resolve.outputs.role_arn }}
@@ -210,14 +230,15 @@ jobs:
           dir: ${{ inputs.dir }}
 
   check:
-    needs: [secret_scan, lint, resolve, plan, apply]
+    needs: [checkout, secret_scan, lint, resolve, plan, apply]
     if: always()
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
       - name: roll up results
         run: |
-          echo "secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          echo "checkout=${{ needs.checkout.result }} secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} resolve=${{ needs.resolve.result }} plan=${{ needs.plan.result }} apply=${{ needs.apply.result }}"
+          [ "${{ needs.checkout.result }}" = "success" ] || { echo "checkout failed"; exit 1; }
           [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
           [ "${{ needs.lint.result }}" = "success" ] || { echo "lint failed"; exit 1; }
           [ "${{ needs.resolve.result }}" = "success" ] || { echo "resolve failed"; exit 1; }
