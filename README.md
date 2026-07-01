@@ -12,8 +12,9 @@ approval gating.
 
 | Layer | Artifact | Purpose |
 |-------|----------|---------|
-| Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,resolve-env,tf-run}` (composite) | Reusable steps you can compose yourself |
+| Building blocks (Tier 1) | `actions/{secret-scan,tf-lint,detect-changes,aws-oidc,resolve-env,tf-run,tf-docs}` (composite) | Reusable steps you can compose yourself |
 | Per-env flow (Tier 2) | `.github/workflows/tf-env.yml` (reusable workflow) | One environment, end-to-end |
+| Docs on merge (Tier 2) | `.github/workflows/tf-docs.yml` (reusable workflow) | Regenerate & commit terraform-docs |
 
 You call `tf-env.yml` **once per environment** and decide gating per env. Each call is its
 own job graph:
@@ -131,6 +132,28 @@ Caveat (inherent to Terraform): a sensitive value still ends up **inside the sav
 and the state**. That's why the plan artifact is uploaded only on the default branch with
 short retention, and state must be an encrypted backend (SSE-KMS). `sensitive = true` keeps
 it out of the **logs**, not out of state.
+
+### Docs on merge (terraform-docs)
+
+Keep every module's README current automatically. On a push, `tf-docs.yml` regenerates the
+terraform-docs table (inject mode) for each dir with `*.tf` and commits the READMEs back to
+the branch:
+
+```yaml
+# .github/workflows/docs.yml (consumer)
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  terraform-docs:
+    uses: Uaena1711/iac-github/.github/workflows/tf-docs.yml@v1
+    permissions: { contents: write }
+```
+
+The doc commit carries `[skip ci]` (and is made with `GITHUB_TOKEN`), so it never
+re-triggers your terraform pipeline or loops. It's a no-op when the docs already match.
 
 ### One-time AWS trust policy (per role, set up outside this catalog)
 

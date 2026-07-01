@@ -24,7 +24,11 @@ This file lists changes to the iac-github Actions catalog. Versioning follows Se
   variables — never written to disk — and Terraform reads them natively. Mark such
   variables `sensitive = true` to redact them from plan output. Wired into `plan`/`apply`;
   a no-op when the stack has no `tf-vars.env`.
-- Building blocks: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `tf-run`, `resolve-env`.
+- Add a `tf-docs` building block + a `tf-docs.yml` reusable workflow: on a push, regenerate
+  each module's README with terraform-docs (pinned + checksum, inject mode) and commit the
+  result back to the branch. The doc commit carries a `[skip ci]` token (and is made with
+  `GITHUB_TOKEN`), so it never re-triggers a pipeline. No-op when docs are already current.
+- Building blocks: `secret-scan`, `tf-lint`, `detect-changes`, `aws-oidc`, `resolve-env`, `tf-run`, `tf-docs`.
 
 ## 1.2.0
 
