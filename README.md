@@ -27,6 +27,7 @@ approval never blocks `dev`.
 | `tf-env.yml` | Per-environment Terraform **detect → plan → apply** (+ manual destroy). Keyless per-stack OIDC, GitHub-Environment approval gating, secret-vault resolution, sensitive `TF_VAR_*` injection. | **[docs/tf-env.md](docs/tf-env.md)** |
 | `cfn-env.yml` | Per-environment CloudFormation **change-set plan → gated apply** (+ manual destroy). Same keyless OIDC + Environment gating; the change set is the plan; sensitive `NoEcho` params via `cfn-params.env`. | **[docs/cfn-env.md](docs/cfn-env.md)** |
 | `tf-docs.yml` | Regenerate terraform-docs on merge and commit the READMEs back (with a `[skip ci]` loop guard). | **[docs/tf-docs.md](docs/tf-docs.md)** |
+| `docker-image.yml` | Build a Docker image and **optionally push** it to a **provider-selected** registry (GHCR default; `ecr`/… pluggable via `registry-login`). Caller-matrix for N images; digests to the run Summary. | **[docs/docker-image.md](docs/docker-image.md)** |
 
 👉 **Full working consumer:** [Uaena1711/iac-github-terraform-example](https://github.com/Uaena1711/iac-github-terraform-example)
 — copy its layout (`envs/<env>/{provider.tf,main.tf,tf-ci.env}`, a shared `modules/`, the callers).
@@ -48,13 +49,16 @@ Composite actions you can compose into your own workflow. Each has its own `acti
 | [`tf-docs`](actions/tf-docs) | terraform-docs generation (pinned + checksum) |
 | [`cfn-lint`](actions/cfn-lint) | Lint CloudFormation templates with cfn-lint (pinned; static, no credentials) |
 | [`cfn-run`](actions/cfn-run) | CloudFormation change-set `plan` \| `apply` \| `destroy-plan` \| `destroy` for one stack |
+| [`registry-login`](actions/registry-login) | `docker login` to a registry via a pluggable provider (`providers/<name>.sh`) — `ghcr` live, `ecr` reference |
+| [`docker-lint`](actions/docker-lint) | Lint Dockerfile(s) with hadolint (pinned + checksum) |
 
 ## Tool images
 
 The deploy/lint jobs default to pinned **GHCR** images that bake the heavy tools (terraform,
 tflint, terraform-docs, aws-cli, cfn-lint) so nothing heavy installs at runtime and there's no
 Docker Hub rate-limit exposure. Built in a dedicated repo,
-[`Uaena1711/iac-github-images`](https://github.com/Uaena1711/iac-github-images). See
+[`Uaena1711/iac-github-images`](https://github.com/Uaena1711/iac-github-images), which **builds those
+images by calling this catalog's [`docker-image.yml`](docs/docker-image.md)** (dogfooding). See
 **[docs/images.md](docs/images.md)** — override any `*_image` input (or set `""` for the host).
 
 ## Versioning & pinning

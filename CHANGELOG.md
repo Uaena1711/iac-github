@@ -3,6 +3,25 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.5.0
+
+- Add a **reusable Docker-image build/publish pipeline** (`docker-image.yml`, Tier 2) with the same
+  **flat, per-job-image** shape as `tf-env`/`cfn-env`: `checkout` + `secret_scan` + `lint` → `build`
+  → `check`, each job in its own image (`*_image` inputs → `container_image` → host), wired from the
+  shared composites. Builds one image and **optionally pushes** it (`push` toggle) to a
+  **provider-selected registry**. Call once per image via a caller `strategy.matrix`. See
+  `docs/docker-image.md`.
+- New **Tier-1 building blocks**: **`registry-login`** — `docker login` via a pluggable provider
+  (`providers/<name>.sh`; `ghcr` live, `ecr` reference — **adding a registry is one new script**);
+  **`docker-lint`** — hadolint Dockerfile lint (pinned + checksum).
+- Native **`platforms: linux/amd64`** skips QEMU, so amd64-only builds run **nothing privileged**
+  (QEMU's `--privileged` binfmt step registers only for a non-native arch).
+- `iac-github-images` now **builds its tool images by calling this pipeline** (`provider: ghcr`,
+  amd64-only) instead of a bespoke matrix — the image builds dogfood the catalog, like the IaC flows.
+- Re-pin the `iac-github-tf`/`iac-github-cfn` image digests in `tf-env`/`cfn-env`/`tf-docs` to the
+  images republished through the new pipeline. Independent of `tf-env`/`cfn-env` otherwise — no
+  structural changes to the Terraform/CloudFormation flows.
+
 ## 2.4.0
 
 - **Bake the heavy CI tools into pinned GHCR images** so `tf-env`/`cfn-env`/`tf-docs` install

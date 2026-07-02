@@ -28,7 +28,7 @@ on:
         default: "0.24.0"
       container_image:
         type: string
-        default: "ghcr.io/uaena1711/iac-github-tf@sha256:9d08ce4284bf600b7d00f223dd60bd90aedbaf3834728b124cfbbd36e40f2b2e"   # terraform-docs baked; set "" for host
+        default: "ghcr.io/uaena1711/iac-github-tf@sha256:18c9b4c9c85b830f4d9376f2ac94821f542e312e9b4637d9394d072fd05e961b"   # terraform-docs baked; set "" for host
       runs_on:
         type: string
         default: "ubuntu-latest"

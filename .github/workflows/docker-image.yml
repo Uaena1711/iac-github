@@ -1,0 +1,249 @@
+# =============================================================================
+# iac-github :: reusable Docker-image build/publish pipeline (a layer-2 pipeline).
+#
+# Same flat, per-job-image shape as tf-env/cfn-env — each stage is its OWN job in its OWN image
+# (only the tools its steps need); the source is passed as an artifact so a job can run in a
+# minimal image. Built from the shared Tier-1 composites (checkout-artifact, secret-scan, docker-lint).
+#
+#   checkout ────┐  (uploads the source as an artifact)
+#   secret_scan ─┤
+#   lint ────────┼─▶ build (+optional push) ─▶ check        (ONE image per call)
+#                │   (build pulls the source via download-artifact — no git/tar needed)
+#
+# One image per call (caller strategy.matrix for N images). Push is optional; login is delegated to
+# the pluggable registry-login composite (ghcr | ecr | ...). Native amd64 skips QEMU.
+#
+# Per-job images: each `*_image` falls back to `container_image` (empty = the runner host). The
+# BUILD job is the one unavoidably-combined step (setup-buildx + login + build-push share a single
+# BuildKit daemon + docker config) — it must run on a DOCKER-CAPABLE runner/image (host by default).
+#
+# Inner action refs are full-path (a reusable workflow's ./local resolves against the CALLER);
+# @feat during the live test, flipped to @v2 at release.
+# =============================================================================
+name: docker-image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Full image base ref, e.g. ghcr.io/owner/name (caller computes owner)."
+        type: string
+        required: true
+      name:
+        description: "Short image id (artifact/cache-safe), unique per matrix leg, e.g. my-app."
+        type: string
+        required: true
+      context:
+        description: "Docker build context directory."
+        type: string
+        required: true
+      provider:
+        description: "registry-login provider: ghcr | ecr | ... (only used when push=true)."
+        type: string
+        default: ghcr
+      registry:
+        description: "Registry host (ghcr.io | <acct>.dkr.ecr.<region>.amazonaws.com)."
+        type: string
+        default: ghcr.io
+      dockerfile:
+        description: "Dockerfile path. Empty -> <context>/Dockerfile."
+        type: string
+        default: ''
+      platforms:
+        description: "buildx target platforms. 'linux/amd64' (native) skips QEMU."
+        type: string
+        default: linux/amd64,linux/arm64
+      push:
+        description: "Push to the registry (false = build-only validation, no login)."
+        type: boolean
+        default: true
+      aws_region:
+        description: "AWS region forwarded to registry-login (ecr provider)."
+        type: string
+        default: ''
+      build_args:
+        description: "Newline-separated build args passed to build-push-action."
+        type: string
+        default: ''
+      provenance:
+        description: "build-push-action provenance attestation."
+        type: boolean
+        default: false
+      cache_scope:
+        description: "gha cache scope. Empty -> falls back to `name`."
+        type: string
+        default: ''
+      lint_threshold:
+        description: "hadolint failure threshold: error | warning | info | style."
+        type: string
+        default: error
+      # Per-job container images (each empty -> container_image -> the runner host).
+      container_image:
+        description: "Shared fallback image for every job (empty = host)."
+        type: string
+        default: ''
+      checkout_image:
+        description: "Image for the checkout job (needs git; empty = host)."
+        type: string
+        default: ''
+      secret_scan_image:
+        description: "Image for the secret_scan job (gitleaks baked)."
+        type: string
+        default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+      lint_image:
+        description: "Image for the lint job (hadolint; empty = host, hadolint pin installed)."
+        type: string
+        default: ''
+      build_image:
+        description: "Image for the build job — MUST be docker-capable (empty = host)."
+        type: string
+        default: ''
+      runs_on:
+        description: "Runner label."
+        type: string
+        default: ubuntu-latest
+      tags:
+        description: "docker/metadata-action tag rules (overrides the default ruleset)."
+        type: string
+        default: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
+          type=raw,value=latest,enable={{is_default_branch}}
+    secrets:
+      registry_username:
+        description: "Registry username (default: the GitHub actor)."
+        required: false
+      registry_password:
+        description: "Registry password/token (default: GITHUB_TOKEN)."
+        required: false
+    outputs:
+      digest:
+        description: "The pushed image digest (sha256:...)."
+        value: ${{ jobs.build.outputs.digest }}
+      tags:
+        description: "The resolved image tags."
+        value: ${{ jobs.build.outputs.tags }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-image-${{ github.ref }}-${{ inputs.name }}
+  cancel-in-progress: false
+
+jobs:
+  # Single checkout: upload the source as an artifact so the build job can pull it without git/tar
+  # (download-artifact is a Node action) — lets it run in a minimal image.
+  checkout:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
+    permissions: { contents: read }
+    steps:
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: upload
+          name: docker-src-${{ inputs.name }}
+
+  secret_scan:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.secret_scan_image || inputs.container_image }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
+      - uses: Uaena1711/iac-github/actions/secret-scan@v2
+
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.lint_image || inputs.container_image }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/docker-lint@v2
+        with:
+          path: ${{ inputs.dockerfile || inputs.context }}
+          failure_threshold: ${{ inputs.lint_threshold }}
+
+  # The single unavoidably-combined docker job: setup-buildx + login + build-push share one
+  # BuildKit daemon + docker config, so they cannot be split across jobs/images. Runs on a
+  # docker-capable runner (host by default).
+  build:
+    needs: [checkout, secret_scan, lint]
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.build_image || inputs.container_image }}
+    permissions:
+      contents: read
+      packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
+        with:
+          mode: download
+          name: docker-src-${{ inputs.name }}
+
+      # QEMU only for a non-native arch; it runs a --privileged container. Skip for amd64-only.
+      - if: ${{ inputs.platforms != 'linux/amd64' }}
+        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Registry login (${{ inputs.provider }})
+        if: ${{ inputs.push }}
+        uses: Uaena1711/iac-github/actions/registry-login@v2
+        with:
+          provider: ${{ inputs.provider }}
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username || github.actor }}
+          password: ${{ secrets.registry_password || github.token }}
+          aws_region: ${{ inputs.aws_region }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.image }}
+          tags: ${{ inputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile || format('{0}/Dockerfile', inputs.context) }}
+          push: ${{ inputs.push }}
+          platforms: ${{ inputs.platforms }}
+          provenance: ${{ inputs.provenance }}
+          build-args: ${{ inputs.build_args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.cache_scope || inputs.name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.cache_scope || inputs.name }}
+
+      - name: Digest -> summary
+        if: ${{ inputs.push }}
+        run: |
+          {
+            echo "### ${{ inputs.image }}"
+            echo '```'
+            echo "${{ inputs.image }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    needs: [checkout, secret_scan, lint, build]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - name: roll up results
+        run: |
+          echo "checkout=${{ needs.checkout.result }} secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} build=${{ needs.build.result }}"
+          [ "${{ needs.checkout.result }}" = "success" ]    || { echo "checkout failed";    exit 1; }
+          [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ]        || { echo "lint failed";        exit 1; }
+          [ "${{ needs.build.result }}" = "success" ]       || { echo "build failed";       exit 1; }
+          echo "ok"

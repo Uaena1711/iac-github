@@ -22,7 +22,7 @@ SHA="$(git rev-parse HEAD)"
 # Floating tag -> reusable workflow / whole catalog.
 TAGS="v${MAJOR} v${MAJOR}.${MINOR}"
 # Per-component directory-scoped majors (one version stream drives all for now).
-for c in tf-env tf-run aws-oidc detect-changes secret-scan tf-lint resolve-env tf-docs cfn-env cfn-run cfn-lint checkout-artifact; do
+for c in tf-env tf-run aws-oidc detect-changes secret-scan tf-lint resolve-env tf-docs cfn-env cfn-run cfn-lint checkout-artifact registry-login docker-lint docker-image; do
   TAGS="${TAGS} ${c}/v${MAJOR}"
 done
 

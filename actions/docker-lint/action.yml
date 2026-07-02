@@ -1,0 +1,30 @@
+name: docker-lint
+description: Lint Dockerfile(s) with hadolint (pinned + checksum-verified).
+
+# Building block (Tier 1). Cheap, no cloud access. The calling job just needs a checkout.
+# hadolint is a single static binary; reused if the image already ships it, else the pin is
+# installed (curl/wget + sha256). A repo .hadolint.yaml (if present) is auto-loaded by hadolint.
+inputs:
+  path:
+    description: File OR directory to lint. A directory is searched recursively for Dockerfiles.
+    default: "."
+  failure_threshold:
+    description: "hadolint severity that fails the job: error | warning | info | style."
+    default: "error"
+  hadolint_version:
+    default: "2.14.0"
+  hadolint_sha256:
+    description: SHA256 of hadolint-linux-x86_64 (integrity pin).
+    default: "6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47"
+
+runs:
+  using: composite
+  steps:
+    - name: hadolint
+      shell: sh
+      env:
+        P: ${{ inputs.path }}
+        THRESHOLD: ${{ inputs.failure_threshold }}
+        V: ${{ inputs.hadolint_version }}
+        SHA: ${{ inputs.hadolint_sha256 }}
+      run: sh "$GITHUB_ACTION_PATH/docker-lint.sh"

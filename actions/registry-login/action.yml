@@ -1,0 +1,36 @@
+name: registry-login
+description: >-
+  Log Docker in to a container registry. The registry is chosen by `provider`, pluggable via
+  providers/<name>.sh (each performs a `docker login`). `ghcr` ships live; `ecr` ships as a
+  reference plugin (needs AWS credentials in the job — run aws-oidc first). Add a registry by
+  dropping providers/<name>.sh — no change to this action or any workflow.
+
+inputs:
+  provider:
+    description: "Registry provider: ghcr | ecr | ... (selects providers/<name>.sh)."
+    default: "ghcr"
+  registry:
+    description: "Registry host (ghcr.io | <acct>.dkr.ecr.<region>.amazonaws.com)."
+    default: "ghcr.io"
+  username:
+    description: "Registry username (ghcr: the GitHub actor). Empty -> provider default."
+    default: ""
+  password:
+    description: "Registry password/token (ghcr: GITHUB_TOKEN). Never placed on argv."
+    default: ""
+  aws_region:
+    description: "AWS region for the ecr provider (empty = inherit ambient AWS_REGION)."
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - id: login
+      shell: sh
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USERNAME: ${{ inputs.username }}
+        REGISTRY_PASSWORD: ${{ inputs.password }}
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: sh "$GITHUB_ACTION_PATH/registry-login.sh"

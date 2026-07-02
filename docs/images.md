@@ -9,9 +9,11 @@ CI tools**, so nothing heavy installs at runtime (only `jq` is ever auto-install
 | `ghcr.io/uaena1711/iac-github-cfn` | aws-cli v2, cfn-lint, jq, git | cfn-env (lint/resolve/plan/apply) |
 | `ghcr.io/gitleaks/gitleaks`        | gitleaks | secret_scan (both) |
 
-**Source & builds:** the Dockerfiles and the build/publish workflow live in a dedicated repo,
+**Source & builds:** the Dockerfiles and the publish workflow live in a dedicated repo,
 [**Uaena1711/iac-github-images**](https://github.com/Uaena1711/iac-github-images) (kept out of this
-catalog — no monorepo). It publishes multi-arch (amd64+arm64) images to GHCR.
+catalog — no monorepo). Its `publish.yml` is a thin caller of this catalog's
+[`docker-image.yml`](docker-image.md) (`provider: ghcr`), so the tool-image builds **dogfood the
+catalog** — multi-arch (amd64+arm64) to GHCR.
 
 ## No Docker Hub, no rate limits
 - Published to **GHCR public → unlimited pulls**, no throttling.
