@@ -47,19 +47,19 @@ on:
         default: ""                    # host (git present); a git image (e.g. alpine/git) for a pure-Docker self-hosted runner
       secret_scan_image:
         type: string
-        default: "zricethezav/gitleaks:v8.30.1"      # gitleaks baked in
+        default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"      # gitleaks baked in
       lint_image:
         type: string
-        default: "hashicorp/terraform:1.15.7"        # terraform (fmt); tflint auto-installs
+        default: "ghcr.io/uaena1711/iac-github-tf@sha256:985e2d2c84b5c8449f5be9c2f130691fc1be9c56ffcc3c5fa7b23291498afe3b"        # terraform + tflint baked
       resolve_image:
         type: string
-        default: "hashicorp/terraform:1.15.7"        # git; jq auto-installs for the github provider
+        default: "ghcr.io/uaena1711/iac-github-tf@sha256:985e2d2c84b5c8449f5be9c2f130691fc1be9c56ffcc3c5fa7b23291498afe3b"        # terraform + tflint + jq baked
       plan_image:
         type: string
-        default: "hashicorp/terraform:1.15.7"        # terraform reused; jq auto-installs (github)
+        default: "ghcr.io/uaena1711/iac-github-tf@sha256:985e2d2c84b5c8449f5be9c2f130691fc1be9c56ffcc3c5fa7b23291498afe3b"        # terraform + tflint + jq baked
       apply_image:
         type: string
-        default: "hashicorp/terraform:1.15.7"        # terraform reused; jq auto-installs (github)
+        default: "ghcr.io/uaena1711/iac-github-tf@sha256:985e2d2c84b5c8449f5be9c2f130691fc1be9c56ffcc3c5fa7b23291498afe3b"        # terraform + tflint + jq baked
       tf_version:
         type: string
         default: "1.15.7"
