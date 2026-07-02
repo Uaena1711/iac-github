@@ -50,6 +50,7 @@ Composite actions you can compose into your own workflow. Each has its own `acti
 | [`cfn-lint`](actions/cfn-lint) | Lint CloudFormation templates with cfn-lint (pinned; static, no credentials) |
 | [`cfn-run`](actions/cfn-run) | CloudFormation change-set `plan` \| `apply` \| `destroy-plan` \| `destroy` for one stack |
 | [`registry-login`](actions/registry-login) | `docker login` to a registry via a pluggable provider (`providers/<name>.sh`) — `ghcr` live, `ecr` reference |
+| [`docker-lint`](actions/docker-lint) | Lint Dockerfile(s) with hadolint (pinned + checksum) |
 
 ## Tool images
 
