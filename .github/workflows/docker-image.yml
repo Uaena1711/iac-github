@@ -1,14 +1,18 @@
 # =============================================================================
-# iac-github :: reusable Docker-image build/publish workflow.
+# iac-github :: reusable Docker-image build/publish pipeline (a layer-2 pipeline).
 #
-# Builds ONE image and OPTIONALLY pushes it (push toggle) to a PROVIDER-SELECTED registry.
-# Login is delegated to the pluggable actions/registry-login composite (ghcr | ecr | ...), so
-# adding a registry is one new providers/<name>.sh — no change here. Call once per image via a
-# caller `strategy.matrix`. Standalone: the Terraform/CloudFormation pipelines do not use this.
+# Layered like tf-env/cfn-env — it INHERITS the shared base _gate.yml (checkout + secret_scan),
+# then adds the domain lint (hadolint) and build:
 #
-# NOTE: the registry-login@ ref below is a same-repo composite and MUST be a full pinned ref
-# (relative ./ resolves to the CALLER inside a reusable workflow). It is @<branch> during the
-# pre-merge live test and flipped to @v2 at release.
+#   gate (_gate.yml) ─┬─▶ build (downloads source artifact, +optional push) ─▶ check
+#   lint (hadolint) ──┘
+#
+# Build ONE image per call (caller strategy.matrix for N images). Push is optional; when pushing,
+# login is delegated to the pluggable registry-login composite (ghcr | ecr | ...). Native amd64
+# skips QEMU (nothing privileged). Standalone: the IaC pipelines don't use this.
+#
+# Same-repo inner refs are full-path (a reusable workflow's ./local resolves against the CALLER);
+# @feat during the live test, flipped to @v2 at release.
 # =============================================================================
 name: docker-image
 
@@ -17,6 +21,10 @@ on:
     inputs:
       image:
         description: "Full image base ref, e.g. ghcr.io/owner/name (caller computes owner)."
+        type: string
+        required: true
+      name:
+        description: "Short image id (artifact/cache-safe), unique per matrix leg, e.g. my-app."
         type: string
         required: true
       context:
@@ -36,7 +44,7 @@ on:
         type: string
         default: ''
       platforms:
-        description: "buildx target platforms."
+        description: "buildx target platforms. 'linux/amd64' (native) skips QEMU."
         type: string
         default: linux/amd64,linux/arm64
       push:
@@ -56,9 +64,13 @@ on:
         type: boolean
         default: false
       cache_scope:
-        description: "gha cache scope. Empty -> falls back to `image`."
+        description: "gha cache scope. Empty -> falls back to `name`."
         type: string
         default: ''
+      lint_threshold:
+        description: "hadolint failure threshold: error | warning | info | style."
+        type: string
+        default: error
       runs_on:
         description: "Runner label."
         type: string
@@ -89,20 +101,47 @@ on:
 
 permissions:
   contents: read
-  packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
+
+concurrency:
+  group: docker-image-${{ github.ref }}-${{ inputs.name }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  # Inherit the shared base: upload the source once + secret_scan (gitleaks).
+  gate:
+    uses: Uaena1711/iac-github/.github/workflows/_gate.yml@feat/docker-image-pipeline
+    with:
+      artifact_name: docker-src-${{ inputs.name }}
+      runs_on: ${{ inputs.runs_on }}
+
+  # Domain lint: hadolint on the image's Dockerfile. Runs in parallel (own checkout).
+  lint:
     runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/docker-lint@feat/docker-image-pipeline
+        with:
+          path: ${{ inputs.dockerfile || inputs.context }}
+          failure_threshold: ${{ inputs.lint_threshold }}
+
+  build:
+    needs: [gate, lint]
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read
+      packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
     steps:
-      - uses: actions/checkout@v5
+      # Pull the source the gate uploaded (download-artifact is a Node action — no git/tar needed).
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/docker-image-pipeline
+        with:
+          mode: download
+          name: docker-src-${{ inputs.name }}
 
-      # QEMU is only needed to emulate a NON-native arch (e.g. arm64 on an amd64 host); it
-      # runs a --privileged container to register binfmt handlers. Skip it for native amd64-only
-      # builds so nothing privileged runs. Multi-arch callers get it automatically.
+      # QEMU only for a non-native arch; it runs a --privileged container. Skip for amd64-only.
       - if: ${{ inputs.platforms != 'linux/amd64' }}
         uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -137,8 +176,8 @@ jobs:
           build-args: ${{ inputs.build_args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ inputs.cache_scope || inputs.image }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.cache_scope || inputs.image }}
+          cache-from: type=gha,scope=${{ inputs.cache_scope || inputs.name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.cache_scope || inputs.name }}
 
       - name: Digest -> summary
         if: ${{ inputs.push }}
@@ -149,3 +188,17 @@ jobs:
             echo "${{ inputs.image }}@${{ steps.build.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    needs: [gate, lint, build]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - name: roll up results
+        run: |
+          echo "gate=${{ needs.gate.result }} lint=${{ needs.lint.result }} build=${{ needs.build.result }}"
+          [ "${{ needs.gate.result }}" = "success" ]  || { echo "gate failed";  exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ]  || { echo "lint failed";  exit 1; }
+          [ "${{ needs.build.result }}" = "success" ] || { echo "build failed"; exit 1; }
+          echo "ok"
