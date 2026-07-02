@@ -16,6 +16,9 @@ checkout ─▶ qemu/buildx ─▶ registry-login (if push) ─▶ metadata ─�
   `ecr` ships as a reference plugin (needs AWS creds in the job — run `aws-oidc` first).
 - **Multi-arch** (`linux/amd64,linux/arm64`) via buildx + QEMU; **gha cache**; tags/labels from
   `docker/metadata-action`. The pushed **digest is written to the run Summary** (pin it downstream).
+- **`platforms: linux/amd64`** (single native arch) **skips QEMU entirely** — no `--privileged`
+  container runs. QEMU only registers when a non-native arch is requested. (GitHub Actions
+  `container:` jobs are Linux/amd64, so amd64-only is the right default for CI tool images.)
 
 ## Quick start — one image
 
