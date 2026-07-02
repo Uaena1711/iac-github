@@ -77,7 +77,9 @@ jobs:
 
       - name: Digest (pin this in the tf-env/cfn-env defaults)
         run: |
-          echo "### ${{ matrix.image.name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### ${{ matrix.image.name }}"
+            echo '```'
+            echo "ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
