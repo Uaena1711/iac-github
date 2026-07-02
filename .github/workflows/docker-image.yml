@@ -1,21 +1,23 @@
 # =============================================================================
 # iac-github :: reusable Docker-image build/publish pipeline (a layer-2 pipeline).
 #
-# Layered like tf-env/cfn-env — it INHERITS the shared base _gate.yml (checkout + secret_scan),
-# then adds the domain lint (hadolint) and build. Each job runs in its OWN image (only the tools
-# its steps need); the source is passed as an artifact so a job can run in a minimal image.
+# Same flat, per-job-image shape as tf-env/cfn-env — each stage is its OWN job in its OWN image
+# (only the tools its steps need); the source is passed as an artifact so a job can run in a
+# minimal image. Built from the shared Tier-1 composites (checkout-artifact, secret-scan, docker-lint).
 #
-#   gate (_gate.yml) ─┬─▶ lint (hadolint) ─┐
-#                     └────────────────────┴─▶ build (+optional push) ─▶ check
+#   checkout ────┐  (uploads the source as an artifact)
+#   secret_scan ─┤
+#   lint ────────┼─▶ build (+optional push) ─▶ check        (ONE image per call)
+#                │   (build pulls the source via download-artifact — no git/tar needed)
 #
-# One image per call (caller strategy.matrix for N images). Push is optional; login is delegated
-# to the pluggable registry-login composite (ghcr | ecr | ...). Native amd64 skips QEMU.
+# One image per call (caller strategy.matrix for N images). Push is optional; login is delegated to
+# the pluggable registry-login composite (ghcr | ecr | ...). Native amd64 skips QEMU.
 #
 # Per-job images: each `*_image` falls back to `container_image` (empty = the runner host). The
 # BUILD job is the one unavoidably-combined step (setup-buildx + login + build-push share a single
 # BuildKit daemon + docker config) — it must run on a DOCKER-CAPABLE runner/image (host by default).
 #
-# Same-repo inner refs are full-path (a reusable workflow's ./local resolves against the CALLER);
+# Inner action refs are full-path (a reusable workflow's ./local resolves against the CALLER);
 # @feat during the live test, flipped to @v2 at release.
 # =============================================================================
 name: docker-image
@@ -75,18 +77,17 @@ on:
         description: "hadolint failure threshold: error | warning | info | style."
         type: string
         default: error
-      # Per-job container images (each empty -> container_image -> the runner host). Each job runs
-      # in its OWN image with only the tools its steps use.
+      # Per-job container images (each empty -> container_image -> the runner host).
       container_image:
         description: "Shared fallback image for every job (empty = host)."
         type: string
         default: ''
       checkout_image:
-        description: "Image for the gate's checkout job (needs git; empty = host)."
+        description: "Image for the checkout job (needs git; empty = host)."
         type: string
         default: ''
       secret_scan_image:
-        description: "Image for the gate's secret_scan job (gitleaks baked)."
+        description: "Image for the secret_scan job (gitleaks baked)."
         type: string
         default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
       lint_image:
@@ -133,28 +134,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Inherit the shared base: upload the source once + secret_scan (gitleaks). Each of its jobs
-  # runs in its own image (checkout_image / secret_scan_image).
-  gate:
-    uses: Uaena1711/iac-github/.github/workflows/_gate.yml@feat/docker-image-pipeline
-    with:
-      artifact_name: docker-src-${{ inputs.name }}
-      runs_on: ${{ inputs.runs_on }}
-      checkout_image: ${{ inputs.checkout_image || inputs.container_image }}
-      secret_scan_image: ${{ inputs.secret_scan_image || inputs.container_image }}
-
-  # Domain lint: hadolint on the image's Dockerfile. Runs in lint_image, pulling the source via
-  # the gate artifact (download-artifact is a Node action) so it can run in a minimal hadolint image.
-  lint:
-    needs: [gate]
+  # Single checkout: upload the source as an artifact so the build job can pull it without git/tar
+  # (download-artifact is a Node action) — lets it run in a minimal image.
+  checkout:
     runs-on: ${{ inputs.runs_on }}
-    container: ${{ inputs.lint_image || inputs.container_image }}
+    container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
     permissions: { contents: read }
     steps:
       - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/docker-image-pipeline
         with:
-          mode: download
+          mode: upload
           name: docker-src-${{ inputs.name }}
+
+  secret_scan:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.secret_scan_image || inputs.container_image }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
+      - uses: Uaena1711/iac-github/actions/secret-scan@feat/docker-image-pipeline
+
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.lint_image || inputs.container_image }}
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
       - uses: Uaena1711/iac-github/actions/docker-lint@feat/docker-image-pipeline
         with:
           path: ${{ inputs.dockerfile || inputs.context }}
@@ -164,7 +170,7 @@ jobs:
   # BuildKit daemon + docker config, so they cannot be split across jobs/images. Runs on a
   # docker-capable runner (host by default).
   build:
-    needs: [gate, lint]
+    needs: [checkout, secret_scan, lint]
     runs-on: ${{ inputs.runs_on }}
     container: ${{ inputs.build_image || inputs.container_image }}
     permissions:
@@ -228,15 +234,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   check:
-    needs: [gate, lint, build]
+    needs: [checkout, secret_scan, lint, build]
     if: always()
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
       - name: roll up results
         run: |
-          echo "gate=${{ needs.gate.result }} lint=${{ needs.lint.result }} build=${{ needs.build.result }}"
-          [ "${{ needs.gate.result }}" = "success" ]  || { echo "gate failed";  exit 1; }
-          [ "${{ needs.lint.result }}" = "success" ]  || { echo "lint failed";  exit 1; }
-          [ "${{ needs.build.result }}" = "success" ] || { echo "build failed"; exit 1; }
+          echo "checkout=${{ needs.checkout.result }} secret_scan=${{ needs.secret_scan.result }} lint=${{ needs.lint.result }} build=${{ needs.build.result }}"
+          [ "${{ needs.checkout.result }}" = "success" ]    || { echo "checkout failed";    exit 1; }
+          [ "${{ needs.secret_scan.result }}" = "success" ] || { echo "secret scan failed"; exit 1; }
+          [ "${{ needs.lint.result }}" = "success" ]        || { echo "lint failed";        exit 1; }
+          [ "${{ needs.build.result }}" = "success" ]       || { echo "build failed";       exit 1; }
           echo "ok"
