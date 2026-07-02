@@ -3,6 +3,18 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.4.0
+
+- **Bake the heavy CI tools into pinned GHCR images** so `tf-env`/`cfn-env`/`tf-docs` install
+  nothing heavy at runtime (jq stays the only auto-install). Deploy/lint jobs default to
+  `ghcr.io/uaena1711/iac-github-tf` (terraform + tflint + terraform-docs) and
+  `ghcr.io/uaena1711/iac-github-cfn` (aws-cli + cfn-lint), **digest-pinned**; `secret_scan` uses
+  `ghcr.io/gitleaks/gitleaks`. Override any `*_image` (or `""` for host). The Dockerfiles + publish
+  workflow live in a dedicated repo, `Uaena1711/iac-github-images` (no monorepo). See `docs/images.md`.
+- **No Docker Hub, no rate limits:** images are GHCR public (unlimited pulls) and built FROM GHCR
+  public bases (not Docker Hub / not ECR) → zero Docker Hub pulls at build or runtime. Digest-pinning
+  also closes the earlier mutable-tag note.
+
 ## 2.3.0
 
 - `cfn-run` **prints the change-set resource diff** in the `plan` job (Add/Modify/Remove per

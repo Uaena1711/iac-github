@@ -49,6 +49,14 @@ Composite actions you can compose into your own workflow. Each has its own `acti
 | [`cfn-lint`](actions/cfn-lint) | Lint CloudFormation templates with cfn-lint (pinned; static, no credentials) |
 | [`cfn-run`](actions/cfn-run) | CloudFormation change-set `plan` \| `apply` \| `destroy-plan` \| `destroy` for one stack |
 
+## Tool images
+
+The deploy/lint jobs default to pinned **GHCR** images that bake the heavy tools (terraform,
+tflint, terraform-docs, aws-cli, cfn-lint) so nothing heavy installs at runtime and there's no
+Docker Hub rate-limit exposure. Built in a dedicated repo,
+[`Uaena1711/iac-github-images`](https://github.com/Uaena1711/iac-github-images). See
+**[docs/images.md](docs/images.md)** — override any `*_image` input (or set `""` for the host).
+
 ## Versioning & pinning
 
 SemVer git tags; `metadata.json` `version` is the source of truth. Released automatically on
