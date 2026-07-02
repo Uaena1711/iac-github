@@ -1,0 +1,147 @@
+# =============================================================================
+# iac-github :: reusable Docker-image build/publish workflow.
+#
+# Builds ONE image and OPTIONALLY pushes it (push toggle) to a PROVIDER-SELECTED registry.
+# Login is delegated to the pluggable actions/registry-login composite (ghcr | ecr | ...), so
+# adding a registry is one new providers/<name>.sh — no change here. Call once per image via a
+# caller `strategy.matrix`. Standalone: the Terraform/CloudFormation pipelines do not use this.
+#
+# NOTE: the registry-login@ ref below is a same-repo composite and MUST be a full pinned ref
+# (relative ./ resolves to the CALLER inside a reusable workflow). It is @<branch> during the
+# pre-merge live test and flipped to @v2 at release.
+# =============================================================================
+name: docker-image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Full image base ref, e.g. ghcr.io/owner/name (caller computes owner)."
+        type: string
+        required: true
+      context:
+        description: "Docker build context directory."
+        type: string
+        required: true
+      provider:
+        description: "registry-login provider: ghcr | ecr | ... (only used when push=true)."
+        type: string
+        default: ghcr
+      registry:
+        description: "Registry host (ghcr.io | <acct>.dkr.ecr.<region>.amazonaws.com)."
+        type: string
+        default: ghcr.io
+      dockerfile:
+        description: "Dockerfile path. Empty -> <context>/Dockerfile."
+        type: string
+        default: ''
+      platforms:
+        description: "buildx target platforms."
+        type: string
+        default: linux/amd64,linux/arm64
+      push:
+        description: "Push to the registry (false = build-only validation, no login)."
+        type: boolean
+        default: true
+      aws_region:
+        description: "AWS region forwarded to registry-login (ecr provider)."
+        type: string
+        default: ''
+      build_args:
+        description: "Newline-separated build args passed to build-push-action."
+        type: string
+        default: ''
+      provenance:
+        description: "build-push-action provenance attestation."
+        type: boolean
+        default: false
+      cache_scope:
+        description: "gha cache scope. Empty -> falls back to `image`."
+        type: string
+        default: ''
+      runs_on:
+        description: "Runner label."
+        type: string
+        default: ubuntu-latest
+      tags:
+        description: "docker/metadata-action tag rules (overrides the default ruleset)."
+        type: string
+        default: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
+          type=raw,value=latest,enable={{is_default_branch}}
+    secrets:
+      registry_username:
+        description: "Registry username (default: the GitHub actor)."
+        required: false
+      registry_password:
+        description: "Registry password/token (default: GITHUB_TOKEN)."
+        required: false
+    outputs:
+      digest:
+        description: "The pushed image digest (sha256:...)."
+        value: ${{ jobs.build.outputs.digest }}
+      tags:
+        description: "The resolved image tags."
+        value: ${{ jobs.build.outputs.tags }}
+
+permissions:
+  contents: read
+  packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Registry login (${{ inputs.provider }})
+        if: ${{ inputs.push }}
+        uses: Uaena1711/iac-github/actions/registry-login@feat/docker-image-pipeline
+        with:
+          provider: ${{ inputs.provider }}
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username || github.actor }}
+          password: ${{ secrets.registry_password || github.token }}
+          aws_region: ${{ inputs.aws_region }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.image }}
+          tags: ${{ inputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile || format('{0}/Dockerfile', inputs.context) }}
+          push: ${{ inputs.push }}
+          platforms: ${{ inputs.platforms }}
+          provenance: ${{ inputs.provenance }}
+          build-args: ${{ inputs.build_args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.cache_scope || inputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.cache_scope || inputs.image }}
+
+      - name: Digest -> summary
+        if: ${{ inputs.push }}
+        run: |
+          {
+            echo "### ${{ inputs.image }}"
+            echo '```'
+            echo "${{ inputs.image }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

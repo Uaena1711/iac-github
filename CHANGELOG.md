@@ -3,6 +3,19 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.5.0
+
+- Add a **reusable Docker-image build/publish workflow** (`docker-image.yml`, Tier 2): builds one
+  image and **optionally pushes** it (`push` toggle) to a **provider-selected registry**. Login is
+  delegated to a new pluggable **`registry-login`** composite (Tier 1) that dispatches to
+  `providers/<name>.sh` — `ghcr` ships live, `ecr` ships as a reference plugin; **adding a registry
+  is one new script, no workflow change.** Multi-arch buildx, `metadata-action` tags/labels, gha
+  cache, digest to the run Summary. Call once per image via a caller `strategy.matrix`
+  (`secrets: inherit`). See `docs/docker-image.md`.
+- `iac-github-images` now **builds its tool images by calling this workflow** (`provider: ghcr`)
+  instead of a bespoke matrix — the image builds dogfood the catalog, like the IaC pipelines.
+- Independent of `tf-env`/`cfn-env` — no changes to the Terraform/CloudFormation flows.
+
 ## 2.4.0
 
 - **Bake the heavy CI tools into pinned GHCR images** so `tf-env`/`cfn-env`/`tf-docs` install
