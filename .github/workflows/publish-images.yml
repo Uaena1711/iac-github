@@ -16,7 +16,7 @@ on:
     types: [published]
   workflow_dispatch:            # branch preview builds for the pre-merge live test
   push:
-    branches: [main]
+    branches: [main, feat/tool-images]   # TEMP: feat branch for pre-merge test — revert to [main] before merge
     paths:
       - 'images/**'
       - '.github/workflows/publish-images.yml'
