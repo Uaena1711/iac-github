@@ -46,16 +46,16 @@ on:
         default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"      # gitleaks baked in
       lint_image:
         type: string
-        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:84a550e0adcc7291cee3256c5bf6ff2150dca0ce7ce5c949795b8cc13bc341a6"                  # cfn-lint baked
+        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:110df43415b6cd87ae8945680d823a226d2646927b2cc4f304058e713be700ec"                  # cfn-lint baked
       resolve_image:
         type: string
-        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:84a550e0adcc7291cee3256c5bf6ff2150dca0ce7ce5c949795b8cc13bc341a6"            # aws-cli + cfn-lint + jq baked
+        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:110df43415b6cd87ae8945680d823a226d2646927b2cc4f304058e713be700ec"            # aws-cli + cfn-lint + jq baked
       plan_image:
         type: string
-        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:84a550e0adcc7291cee3256c5bf6ff2150dca0ce7ce5c949795b8cc13bc341a6"            # aws-cli + cfn-lint + jq baked
+        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:110df43415b6cd87ae8945680d823a226d2646927b2cc4f304058e713be700ec"            # aws-cli + cfn-lint + jq baked
       apply_image:
         type: string
-        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:84a550e0adcc7291cee3256c5bf6ff2150dca0ce7ce5c949795b8cc13bc341a6"            # aws-cli + cfn-lint + jq baked
+        default: "ghcr.io/uaena1711/iac-github-cfn@sha256:110df43415b6cd87ae8945680d823a226d2646927b2cc4f304058e713be700ec"            # aws-cli + cfn-lint + jq baked
       default_region:
         type: string
         default: ""
