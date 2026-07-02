@@ -2,14 +2,18 @@
 # iac-github :: reusable Docker-image build/publish pipeline (a layer-2 pipeline).
 #
 # Layered like tf-env/cfn-env — it INHERITS the shared base _gate.yml (checkout + secret_scan),
-# then adds the domain lint (hadolint) and build:
+# then adds the domain lint (hadolint) and build. Each job runs in its OWN image (only the tools
+# its steps need); the source is passed as an artifact so a job can run in a minimal image.
 #
-#   gate (_gate.yml) ─┬─▶ build (downloads source artifact, +optional push) ─▶ check
-#   lint (hadolint) ──┘
+#   gate (_gate.yml) ─┬─▶ lint (hadolint) ─┐
+#                     └────────────────────┴─▶ build (+optional push) ─▶ check
 #
-# Build ONE image per call (caller strategy.matrix for N images). Push is optional; when pushing,
-# login is delegated to the pluggable registry-login composite (ghcr | ecr | ...). Native amd64
-# skips QEMU (nothing privileged). Standalone: the IaC pipelines don't use this.
+# One image per call (caller strategy.matrix for N images). Push is optional; login is delegated
+# to the pluggable registry-login composite (ghcr | ecr | ...). Native amd64 skips QEMU.
+#
+# Per-job images: each `*_image` falls back to `container_image` (empty = the runner host). The
+# BUILD job is the one unavoidably-combined step (setup-buildx + login + build-push share a single
+# BuildKit daemon + docker config) — it must run on a DOCKER-CAPABLE runner/image (host by default).
 #
 # Same-repo inner refs are full-path (a reusable workflow's ./local resolves against the CALLER);
 # @feat during the live test, flipped to @v2 at release.
@@ -71,6 +75,28 @@ on:
         description: "hadolint failure threshold: error | warning | info | style."
         type: string
         default: error
+      # Per-job container images (each empty -> container_image -> the runner host). Each job runs
+      # in its OWN image with only the tools its steps use.
+      container_image:
+        description: "Shared fallback image for every job (empty = host)."
+        type: string
+        default: ''
+      checkout_image:
+        description: "Image for the gate's checkout job (needs git; empty = host)."
+        type: string
+        default: ''
+      secret_scan_image:
+        description: "Image for the gate's secret_scan job (gitleaks baked)."
+        type: string
+        default: "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+      lint_image:
+        description: "Image for the lint job (hadolint; empty = host, hadolint pin installed)."
+        type: string
+        default: ''
+      build_image:
+        description: "Image for the build job — MUST be docker-capable (empty = host)."
+        type: string
+        default: ''
       runs_on:
         description: "Runner label."
         type: string
@@ -107,27 +133,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Inherit the shared base: upload the source once + secret_scan (gitleaks).
+  # Inherit the shared base: upload the source once + secret_scan (gitleaks). Each of its jobs
+  # runs in its own image (checkout_image / secret_scan_image).
   gate:
     uses: Uaena1711/iac-github/.github/workflows/_gate.yml@feat/docker-image-pipeline
     with:
       artifact_name: docker-src-${{ inputs.name }}
       runs_on: ${{ inputs.runs_on }}
+      checkout_image: ${{ inputs.checkout_image || inputs.container_image }}
+      secret_scan_image: ${{ inputs.secret_scan_image || inputs.container_image }}
 
-  # Domain lint: hadolint on the image's Dockerfile. Runs in parallel (own checkout).
+  # Domain lint: hadolint on the image's Dockerfile. Runs in lint_image, pulling the source via
+  # the gate artifact (download-artifact is a Node action) so it can run in a minimal hadolint image.
   lint:
+    needs: [gate]
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.lint_image || inputs.container_image }}
     permissions: { contents: read }
     steps:
-      - uses: actions/checkout@v5
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/docker-image-pipeline
+        with:
+          mode: download
+          name: docker-src-${{ inputs.name }}
       - uses: Uaena1711/iac-github/actions/docker-lint@feat/docker-image-pipeline
         with:
           path: ${{ inputs.dockerfile || inputs.context }}
           failure_threshold: ${{ inputs.lint_threshold }}
 
+  # The single unavoidably-combined docker job: setup-buildx + login + build-push share one
+  # BuildKit daemon + docker config, so they cannot be split across jobs/images. Runs on a
+  # docker-capable runner (host by default).
   build:
     needs: [gate, lint]
     runs-on: ${{ inputs.runs_on }}
+    container: ${{ inputs.build_image || inputs.container_image }}
     permissions:
       contents: read
       packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
@@ -135,7 +174,6 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
     steps:
-      # Pull the source the gate uploaded (download-artifact is a Node action — no git/tar needed).
       - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/docker-image-pipeline
         with:
           mode: download
