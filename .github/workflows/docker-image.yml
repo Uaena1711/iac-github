@@ -155,7 +155,7 @@ jobs:
     container: ${{ inputs.secret_scan_image || inputs.container_image }}
     permissions: { contents: read }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
       - uses: Uaena1711/iac-github/actions/secret-scan@v2
 
@@ -164,7 +164,7 @@ jobs:
     container: ${{ inputs.lint_image || inputs.container_image }}
     permissions: { contents: read }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: Uaena1711/iac-github/actions/docker-lint@v2
         with:
           path: ${{ inputs.dockerfile || inputs.context }}
