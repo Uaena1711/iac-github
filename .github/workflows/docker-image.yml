@@ -145,7 +145,7 @@ jobs:
     container: ${{ inputs.checkout_image || inputs.container_image }}   # empty = host (has git)
     permissions: { contents: read }
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/ecr-provider
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: upload
           name: docker-src-${{ inputs.name }}
@@ -157,7 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }        # gitleaks scans history -> needs its own full checkout
-      - uses: Uaena1711/iac-github/actions/secret-scan@feat/ecr-provider
+      - uses: Uaena1711/iac-github/actions/secret-scan@v2
 
   lint:
     runs-on: ${{ inputs.runs_on }}
@@ -165,7 +165,7 @@ jobs:
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
-      - uses: Uaena1711/iac-github/actions/docker-lint@feat/ecr-provider
+      - uses: Uaena1711/iac-github/actions/docker-lint@v2
         with:
           path: ${{ inputs.dockerfile || inputs.context }}
           failure_threshold: ${{ inputs.lint_threshold }}
@@ -185,7 +185,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
     steps:
-      - uses: Uaena1711/iac-github/actions/checkout-artifact@feat/ecr-provider
+      - uses: Uaena1711/iac-github/actions/checkout-artifact@v2
         with:
           mode: download
           name: docker-src-${{ inputs.name }}
@@ -197,7 +197,7 @@ jobs:
 
       - name: Registry login (${{ inputs.provider }})
         if: ${{ inputs.push }}
-        uses: Uaena1711/iac-github/actions/registry-login@feat/ecr-provider
+        uses: Uaena1711/iac-github/actions/registry-login@v2
         with:
           provider: ${{ inputs.provider }}
           registry: ${{ inputs.registry }}
