@@ -84,6 +84,33 @@ jobs:
       push: false              # build, don't push; no login, no creds
 ```
 
+## Push to Amazon ECR (`provider: ecr`)
+
+Keyless — the `ecr` provider exchanges the GitHub OIDC token for temporary role credentials
+in-script (`sts:AssumeRoleWithWebIdentity`), so you only grant `id-token: write` and pass a role.
+
+```yaml
+permissions:
+  contents: read
+  id-token: write            # required: the ecr provider assumes a role via OIDC
+jobs:
+  ecr:
+    uses: Uaena1711/iac-github/.github/workflows/docker-image.yml@v2
+    with:
+      provider: ecr
+      registry: <acct>.dkr.ecr.<region>.amazonaws.com
+      image: <acct>.dkr.ecr.<region>.amazonaws.com/my-app
+      name: my-app
+      context: .
+      aws_region: <region>
+      aws_role_arn: arn:aws:iam::<acct>:role/<role>
+```
+
+Prerequisites (ECR, unlike GHCR, has no push-time auto-create):
+- **Create the ECR repository** first (`aws ecr create-repository`).
+- The **role's trust policy** must allow the calling repo's OIDC subject
+  (`repo:<owner>/<repo>:*`), and it needs `ecr:GetAuthorizationToken` + push actions on the repo.
+
 ## Inputs
 
 | input | default | purpose |
@@ -96,7 +123,8 @@ jobs:
 | `dockerfile` | `''` | Dockerfile path; empty → `<context>/Dockerfile` |
 | `platforms` | `linux/amd64,linux/arm64` | buildx target platforms (`linux/amd64` skips QEMU) |
 | `push` | `true` | push to the registry (false = build-only) |
-| `aws_region` | `''` | forwarded to the `ecr` provider |
+| `aws_region` | `''` | AWS region for the `ecr` provider |
+| `aws_role_arn` | `''` | IAM role the `ecr` provider assumes via OIDC (needs `id-token: write`) |
 | `build_args` | `''` | newline-separated build args |
 | `provenance` | `false` | build-push-action provenance attestation |
 | `cache_scope` | `''` | gha cache scope; empty → falls back to `name` |

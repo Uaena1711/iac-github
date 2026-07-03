@@ -1,9 +1,9 @@
 name: registry-login
 description: >-
   Log Docker in to a container registry. The registry is chosen by `provider`, pluggable via
-  providers/<name>.sh (each performs a `docker login`). `ghcr` ships live; `ecr` ships as a
-  reference plugin (needs AWS credentials in the job — run aws-oidc first). Add a registry by
-  dropping providers/<name>.sh — no change to this action or any workflow.
+  providers/<name>.sh (each performs a `docker login`, owning its own auth). `ghcr` and `ecr` ship
+  live (ecr does keyless GitHub OIDC -> AssumeRoleWithWebIdentity in-script; grant id-token: write +
+  pass aws_role_arn). Add a registry by dropping providers/<name>.sh — no change to this action.
 
 inputs:
   provider:
@@ -21,16 +21,21 @@ inputs:
   aws_region:
     description: "AWS region for the ecr provider (empty = inherit ambient AWS_REGION)."
     default: ""
+  aws_role_arn:
+    description: "IAM role ARN the ecr provider assumes via GitHub OIDC (needs id-token: write)."
+    default: ""
 
 runs:
   using: composite
   steps:
     - id: login
       shell: sh
+      # ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN are inherited from the job env (set when id-token: write).
       env:
         PROVIDER: ${{ inputs.provider }}
         REGISTRY: ${{ inputs.registry }}
         REGISTRY_USERNAME: ${{ inputs.username }}
         REGISTRY_PASSWORD: ${{ inputs.password }}
         AWS_REGION: ${{ inputs.aws_region }}
+        AWS_ROLE_ARN: ${{ inputs.aws_role_arn }}
       run: sh "$GITHUB_ACTION_PATH/registry-login.sh"
