@@ -3,6 +3,17 @@
 This file lists changes to the iac-github Actions catalog. Versioning follows SemVer;
 `metadata.json` `version` is the source of truth and drives the auto-release on `main`.
 
+## 2.6.0
+
+- **The `ecr` registry provider is now live** — `docker-image.yml` can push to Amazon ECR via
+  `provider: ecr`. Keyless: the provider **owns its auth**, exchanging the GitHub OIDC token for
+  temporary role credentials (`sts:AssumeRoleWithWebIdentity`) **in-script**, then `docker login`.
+  The template stays generic — it only adds `id-token: write` on the build job and a new
+  `aws_role_arn` input; no ECR-specific step. Adding a future cloud registry (gcp, …) is still one
+  `providers/<name>.sh`. See `docs/docker-image.md`.
+- `iac-github-images` now **mirrors both tool images to ECR** (`tf-ecr`/`cfn-ecr` jobs, same template,
+  `provider: ecr`) alongside the GHCR publish — dogfooding the provider seam across two registries.
+
 ## 2.5.0
 
 - Add a **reusable Docker-image build/publish pipeline** (`docker-image.yml`, Tier 2) with the same

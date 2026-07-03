@@ -61,6 +61,10 @@ on:
         description: "AWS region forwarded to registry-login (ecr provider)."
         type: string
         default: ''
+      aws_role_arn:
+        description: "IAM role ARN the ecr provider assumes via GitHub OIDC (needs id-token: write)."
+        type: string
+        default: ''
       build_args:
         description: "Newline-separated build args passed to build-push-action."
         type: string
@@ -176,6 +180,7 @@ jobs:
     permissions:
       contents: read
       packages: write        # GHCR push via GITHUB_TOKEN; harmless for other providers
+      id-token: write        # ecr provider assumes an AWS role via OIDC; unused by ghcr
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -199,6 +204,7 @@ jobs:
           username: ${{ secrets.registry_username || github.actor }}
           password: ${{ secrets.registry_password || github.token }}
           aws_region: ${{ inputs.aws_region }}
+          aws_role_arn: ${{ inputs.aws_role_arn }}
 
       - id: meta
         uses: docker/metadata-action@v5

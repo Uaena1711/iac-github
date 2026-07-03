@@ -29,10 +29,14 @@ Rules:
 
 ## Shipped providers
 
-| name   | registry host                               | needs                                   | status    |
-|--------|---------------------------------------------|-----------------------------------------|-----------|
-| `ghcr` | `ghcr.io`                                   | `REGISTRY_PASSWORD` (GITHUB_TOKEN/PAT)  | live      |
-| `ecr`  | `<acct>.dkr.ecr.<region>.amazonaws.com`     | AWS creds in the job (run `aws-oidc` first) | reference |
+| name   | registry host                               | needs                                                       | status |
+|--------|---------------------------------------------|-------------------------------------------------------------|--------|
+| `ghcr` | `ghcr.io`                                   | `REGISTRY_PASSWORD` (GITHUB_TOKEN/PAT)                       | live   |
+| `ecr`  | `<acct>.dkr.ecr.<region>.amazonaws.com`     | `id-token: write` + `aws_role_arn` + `aws_region`; a pre-created repo | live   |
 
-`reference` = the plugin proves the seam but isn't exercised in CI. Wire `aws-oidc` before it when
-you first push to ECR.
+The `ecr` provider owns its auth: it exchanges the GitHub OIDC token for temporary role credentials
+(`sts:AssumeRoleWithWebIdentity`) in-script, then `aws ecr get-login-password | docker login` — so the
+workflow only grants `id-token: write` and passes `aws_role_arn`. The role's trust policy must allow
+the calling repo's OIDC subject, and it needs `ecr:GetAuthorizationToken` + push perms on the repo.
+ECR has no push-time repo auto-create, so the repository must exist first. If AWS creds are already in
+the job env (e.g. a prior `aws-oidc` step), the provider skips the OIDC exchange.
